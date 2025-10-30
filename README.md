@@ -9,22 +9,78 @@ Command-line tool for managing your quantum-resistant Quantdum token vault.
 - ✅ **11-Step Verification** for on-chain signature validation
 - 🌐 **Solana Integration** via RPC (devnet/mainnet)
 
-## Installation
+## Prerequisites
 
-### Quick Install
+Before installing QDUM Vault, you need Rust and Cargo installed on your system.
+
+### Install Rust
+
+**Linux/macOS/WSL:**
 ```bash
-./install.sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-### Manual Install
+After installation, restart your terminal or run:
 ```bash
+source $HOME/.cargo/env
+```
+
+**Windows:**
+
+We recommend using WSL (Windows Subsystem for Linux) for the best experience:
+
+1. **Install WSL** (if not already installed):
+   - Open PowerShell as Administrator and run:
+     ```powershell
+     wsl --install
+     ```
+   - Restart your computer
+
+2. **Launch WSL**:
+   - Open "Ubuntu" from Start Menu, or
+   - Type `wsl` in PowerShell, or
+   - Type `bash` in Command Prompt
+
+3. **Install Rust in WSL**:
+   ```bash
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   source $HOME/.cargo/env
+   ```
+
+Alternatively, you can use native Windows with [Visual Studio C++ Build Tools](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022), but WSL provides better terminal experience for the quantum-themed UI.
+
+## Installation
+
+### Install from crates.io (Recommended)
+
+Once Rust is installed, simply run:
+
+```bash
+cargo install qdum-vault
+```
+
+That's it! The `qdum-vault` command is now available globally.
+
+### Alternative Installation Methods
+
+#### Build from Source (GitHub)
+```bash
+git clone https://github.com/quantdum/qdum-vault.git
+cd qdum-vault
 cargo install --path .
 ```
 
-### Development Mode
+#### Local Development
 ```bash
+git clone https://github.com/quantdum/qdum-vault.git
+cd qdum-vault
 cargo build
 ./target/debug/qdum-vault --help
+```
+
+#### Quick Install Script
+```bash
+./install.sh
 ```
 
 ## Usage
