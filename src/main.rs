@@ -138,6 +138,9 @@ enum Commands {
         #[arg(long, default_value = "3V6ogu16de86nChsmC5wHMKJmCx5YdGXA6fbp3y3497n")]
         mint: String,
     },
+
+    /// Check mint status and public supply statistics
+    MintStatus,
 }
 
 fn get_styles() -> clap::builder::Styles {
@@ -417,6 +420,16 @@ async fn main() -> Result<()> {
 
             cmd_mint(&cli.rpc_url, program_id, wallet_pubkey, &kp_path, mint_pubkey, amount).await?;
         }
+
+        Commands::MintStatus => {
+            println!("{}", "📊 Quantdum Vault - Mint Status".bold().cyan());
+            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
+            println!();
+
+            let program_id = Pubkey::from_str(&cli.program_id)?;
+
+            cmd_mint_status(&cli.rpc_url, program_id).await?;
+        }
     }
 
     Ok(())
@@ -638,13 +651,6 @@ async fn cmd_mint(
 
     println!("{} {}", "Amount:".bold(), format!("{} base units", amount).yellow());
     println!("{} {}", "Mint:  ".bold(), mint.to_string().cyan());
-    println!();
-
-    // Display estimated fee
-    let amount_in_qdum = amount as f64 / 1_000_000.0;
-    println!("{}", "⚠️  Note: Progressive fees apply based on scarcity".yellow());
-    println!("   Minting {} QDUM will incur a SOL fee", amount_in_qdum.to_string().cyan());
-    println!();
 
     let client = VaultClient::new(rpc_url, program_id)?;
     client.mint_tokens(&keypair, mint, amount).await?;
@@ -653,6 +659,13 @@ async fn cmd_mint(
     println!("Fetching updated balance...");
     println!();
     client.check_balance(wallet, mint).await?;
+
+    Ok(())
+}
+
+async fn cmd_mint_status(rpc_url: &str, program_id: Pubkey) -> Result<()> {
+    let client = VaultClient::new(rpc_url, program_id)?;
+    client.get_mint_status().await?;
 
     Ok(())
 }

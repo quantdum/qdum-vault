@@ -909,6 +909,33 @@ impl VaultClient {
         Ok(())
     }
 
+    /// Calculate scarcity multiplier (matches on-chain calculation)
+    fn calculate_scarcity_multiplier(total_minted: u64) -> u64 {
+        const PUBLIC_MINT_SUPPLY: u64 = 3_092_376_853_000_000; // 3,092,376,853 QDUM (72% of total)
+        let percent_minted = (total_minted as u128 * 100) / PUBLIC_MINT_SUPPLY as u128;
+
+        if percent_minted <= 10 { return 3; }
+        if percent_minted <= 25 { return 5; }
+        if percent_minted <= 45 { return 8; }
+        if percent_minted <= 60 { return 12; }
+        if percent_minted <= 70 { return 15; }
+        20 // 71-100%
+    }
+
+    /// Calculate mint fee in lamports (matches on-chain calculation)
+    fn calculate_mint_fee(amount: u64, total_minted: u64) -> u64 {
+        const BASE_FEE_LAMPORTS: u64 = 1_000_000; // 0.001 SOL
+
+        // Base fee: amount / 1000 tokens * 0.001 SOL
+        let base_fee = amount
+            .saturating_mul(BASE_FEE_LAMPORTS)
+            .saturating_div(1_000_000_000);
+
+        let multiplier = Self::calculate_scarcity_multiplier(total_minted);
+
+        base_fee.saturating_mul(multiplier)
+    }
+
     /// Mint QDUM tokens
     pub async fn mint_tokens(
         &self,
@@ -917,9 +944,13 @@ impl VaultClient {
         amount: u64,
     ) -> Result<()> {
         use solana_sdk::instruction::Instruction;
+        use std::io::{self, Write};
 
         // Free mint instruction discriminator (from Anchor IDL)
-        const FREE_MINT_DISCRIMINATOR: [u8; 8] = [164, 250, 205, 24, 232, 61, 200, 237];
+        const FREE_MINT_DISCRIMINATOR: [u8; 8] = [54, 70, 68, 38, 123, 242, 155, 153];
+
+        // Associated Token Program ID
+        const ASSOCIATED_TOKEN_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
         // Derive PDAs
         let (mint_state, _) = Pubkey::find_program_address(
@@ -944,20 +975,86 @@ impl VaultClient {
             &TOKEN_2022_PROGRAM_ID,
         );
 
-        // Get mint state to find dev wallet
+        // Get mint state to find dev wallet and calculate fee
         let mint_state_account = self.rpc_client.get_account(&mint_state)
             .context("Mint state not found - program may not be initialized")?;
 
-        // Parse dev_wallet from mint_state (offset 41 for 32-byte pubkey)
-        let dev_wallet = Pubkey::try_from(&mint_state_account.data[41..73])
+        // Parse mint_state data
+        // Layout: discriminator(8) + authority(32) + mint(32) + total_minted(8) + dev_wallet(32)
+        let total_minted = u64::from_le_bytes(
+            mint_state_account.data[72..80].try_into().unwrap()
+        );
+        let dev_wallet = Pubkey::try_from(&mint_state_account.data[80..112])
             .context("Failed to parse dev wallet from mint state")?;
 
-        // Build instruction data: discriminator + amount (u64)
+        // Calculate fee
+        let fee_lamports = Self::calculate_mint_fee(amount, total_minted);
+        let fee_sol = fee_lamports as f64 / 1_000_000_000.0;
+        let multiplier = Self::calculate_scarcity_multiplier(total_minted);
+        let amount_in_qdum = amount as f64 / 1_000_000.0;
+
+        // Display fee breakdown
+        println!();
+        println!("{}", "╔═══════════════════════════════════════════════════════════╗".bright_cyan());
+        println!("{}", "║                    FEE BREAKDOWN                          ║".bright_cyan().bold());
+        println!("{}", "╚═══════════════════════════════════════════════════════════╝".bright_cyan());
+        println!();
+        println!("{} {}", "Minting Amount:".bold(), format!("{} QDUM", amount_in_qdum).yellow());
+        println!("{} {}", "Current Supply:".bold(), format!("{:.2}%", (total_minted as f64 / 2_150_000_000_000_000.0) * 100.0).cyan());
+        println!("{} {}", "Scarcity Tier: ".bold(), format!("{}x", multiplier).bright_magenta());
+        println!("{} {}", "Mint Fee:      ".bold(), format!("{:.6} SOL", fee_sol).bright_yellow().bold());
+        println!();
+
+        // Confirmation prompt
+        print!("{}", "Continue with mint? (y/n): ".bright_green().bold());
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let answer = input.trim().to_lowercase();
+
+        if answer != "y" && answer != "yes" {
+            println!();
+            println!("{}", "❌ Mint cancelled".red());
+            return Ok(());
+        }
+
+        println!();
+
+        // Check if ATA exists, create it if not
+        let mut instructions = Vec::new();
+
+        match self.rpc_client.get_account(&user_token_account) {
+            Ok(_) => {
+                println!("Token account exists: {}", user_token_account.to_string().cyan());
+            }
+            Err(_) => {
+                println!("Creating token account...");
+
+                // Create ATA instruction
+                let create_ata_ix = Instruction {
+                    program_id: ASSOCIATED_TOKEN_PROGRAM_ID,
+                    accounts: vec![
+                        solana_sdk::instruction::AccountMeta::new(keypair.pubkey(), true),
+                        solana_sdk::instruction::AccountMeta::new(user_token_account, false),
+                        solana_sdk::instruction::AccountMeta::new_readonly(keypair.pubkey(), false),
+                        solana_sdk::instruction::AccountMeta::new_readonly(mint, false),
+                        solana_sdk::instruction::AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+                        solana_sdk::instruction::AccountMeta::new_readonly(TOKEN_2022_PROGRAM_ID, false),
+                    ],
+                    data: vec![],
+                };
+
+                instructions.push(create_ata_ix);
+            }
+        }
+
+        // Build mint instruction data: discriminator + amount (u64)
         let mut instruction_data = Vec::new();
         instruction_data.extend_from_slice(&FREE_MINT_DISCRIMINATOR);
         instruction_data.extend_from_slice(&amount.to_le_bytes());
 
-        // Build accounts list
+        // Build accounts list for mint instruction
         let accounts = vec![
             solana_sdk::instruction::AccountMeta::new(keypair.pubkey(), true),
             solana_sdk::instruction::AccountMeta::new(mint_state, false),
@@ -970,27 +1067,206 @@ impl VaultClient {
             solana_sdk::instruction::AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
         ];
 
-        let instruction = Instruction {
+        let mint_instruction = Instruction {
             program_id: self.program_id,
             accounts,
             data: instruction_data,
         };
 
+        instructions.push(mint_instruction);
+
         let recent_blockhash = self.rpc_client.get_latest_blockhash()?;
         let transaction = Transaction::new_signed_with_payer(
-            &[instruction],
+            &instructions,
             Some(&keypair.pubkey()),
             &[keypair],
             recent_blockhash,
         );
 
-        println!("Sending mint transaction...");
+        // Progress bar during transaction
+        let pb = ProgressBar::new(3);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.cyan} [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+                .unwrap()
+                .progress_chars("━━╸")
+        );
+
+        pb.set_message(format!("{}", "Building transaction...".bright_white()));
+        pb.inc(1);
+
+        pb.set_message(format!("{}", "Sending to network...".bright_white()));
         let signature = self.rpc_client.send_and_confirm_transaction(&transaction)?;
+        pb.inc(1);
+
+        pb.set_message(format!("{}", "Confirming...".bright_white()));
+        pb.inc(1);
+
+        pb.finish_with_message(format!("{}", "✓ Transaction confirmed".bright_green()));
+        println!();
 
         println!();
-        println!("{}", "✅ Tokens Minted Successfully!".green().bold());
-        println!("   Transaction: {}", signature.to_string().cyan());
-        println!("   View on Solscan: https://solscan.io/tx/{}?cluster=devnet", signature);
+        println!("{}", "╔═══════════════════════════════════════════════════════════╗".bright_green());
+        println!("{}", "║               ✅ TOKENS MINTED SUCCESSFULLY               ║".bright_green().bold());
+        println!("{}", "╚═══════════════════════════════════════════════════════════╝".bright_green());
+        println!();
+        println!("{} {}", "   Amount:     ".bold(), format!("{} QDUM", amount_in_qdum).bright_green());
+        println!("{} {}", "   Fee Paid:   ".bold(), format!("{:.6} SOL", fee_sol).bright_yellow());
+        println!("{} {}", "   Transaction:".bold(), signature.to_string().cyan());
+        println!();
+        println!("{}", format!("   View on Solscan: https://solscan.io/tx/{}?cluster=devnet", signature).dimmed());
+        println!();
+
+        Ok(())
+    }
+
+    /// Get mint status and display public supply statistics
+    pub async fn get_mint_status(&self) -> Result<()> {
+        const PUBLIC_MINT_SUPPLY: u64 = 3_092_376_853_000_000; // 3,092,376,853 QDUM (72%)
+        const AIRDROP_CAP: u64 = 1_202_590_443_000_000; // 1,202,590,443 QDUM (28%)
+        const TOTAL_SUPPLY: u64 = 4_294_967_296_000_000; // 4,294,967,296 QDUM (2^32)
+
+        // Get mint state
+        let (mint_state, _) = Pubkey::find_program_address(
+            &[b"state"],
+            &self.program_id,
+        );
+
+        let mint_state_account = self.rpc_client.get_account(&mint_state)
+            .context("Mint state not found - program may not be initialized")?;
+
+        // Parse mint state data
+        // Layout: discriminator(8) + authority(32) + mint(32) + total_minted(8) + dev_wallet(32) + ...
+        let total_minted = u64::from_le_bytes(
+            mint_state_account.data[72..80].try_into().unwrap()
+        );
+        let airdrop_distributed = u64::from_le_bytes(
+            mint_state_account.data[144..152].try_into().unwrap()
+        );
+
+        // Convert to QDUM (from base units)
+        let total_minted_qdum = total_minted as f64 / 1_000_000.0;
+        let airdrop_distributed_qdum = airdrop_distributed as f64 / 1_000_000.0;
+        let public_supply_qdum = PUBLIC_MINT_SUPPLY as f64 / 1_000_000.0;
+        let total_supply_qdum = TOTAL_SUPPLY as f64 / 1_000_000.0;
+
+        // Calculate percentages
+        let public_percent = (total_minted as f64 / PUBLIC_MINT_SUPPLY as f64) * 100.0;
+        let total_percent = ((total_minted + airdrop_distributed) as f64 / TOTAL_SUPPLY as f64) * 100.0;
+
+        // Remaining
+        let public_remaining = PUBLIC_MINT_SUPPLY.saturating_sub(total_minted);
+        let public_remaining_qdum = public_remaining as f64 / 1_000_000.0;
+
+        // Calculate scarcity tier
+        let multiplier = Self::calculate_scarcity_multiplier(total_minted);
+
+        println!();
+        println!("{}", "╔═══════════════════════════════════════════════════════════╗".bright_cyan());
+        println!("{}", "║              📊 PUBLIC MINT SUPPLY STATUS                ║".bright_cyan().bold());
+        println!("{}", "╚═══════════════════════════════════════════════════════════╝".bright_cyan());
+        println!();
+
+        // Progress bar for public mint
+        let bar_width = 50;
+        let filled = (public_percent / 100.0 * bar_width as f64) as usize;
+        let empty = bar_width - filled;
+
+        println!("{}", "Public Mint Progress:".bold());
+        print!("  [");
+        for _ in 0..filled {
+            print!("{}", "━".bright_green());
+        }
+        for _ in 0..empty {
+            print!("{}", "─".dimmed());
+        }
+        println!("] {:.2}%", public_percent);
+        println!();
+
+        // Stats table
+        let mut table = comfy_table::Table::new();
+        table.load_preset(comfy_table::presets::UTF8_FULL);
+        table
+            .set_header(vec!["Metric".to_string(), "Value".to_string()])
+            .add_row(vec![
+                "Minted".to_string(),
+                format!("{} QDUM", total_minted_qdum as u64).bright_green().to_string()
+            ])
+            .add_row(vec![
+                "Remaining".to_string(),
+                format!("{} QDUM", public_remaining_qdum as u64).bright_yellow().to_string()
+            ])
+            .add_row(vec![
+                "Public Supply".to_string(),
+                format!("{} QDUM", public_supply_qdum as u64).bright_cyan().to_string()
+            ])
+            .add_row(vec![
+                "Progress".to_string(),
+                format!("{:.2}%", public_percent).bright_magenta().to_string()
+            ])
+            .add_row(vec![
+                "Current Tier".to_string(),
+                format!("{}x multiplier", multiplier).bright_blue().to_string()
+            ]);
+
+        println!("{}", table);
+        println!();
+
+        // Airdrops and total
+        println!("{}", "╔═══════════════════════════════════════════════════════════╗".bright_blue());
+        println!("{}", "║                  📈 TOTAL SUPPLY STATUS                   ║".bright_blue().bold());
+        println!("{}", "╚═══════════════════════════════════════════════════════════╝".bright_blue());
+        println!();
+
+        let combined_minted = total_minted + airdrop_distributed;
+        let combined_minted_qdum = combined_minted as f64 / 1_000_000.0;
+
+        let mut total_table = comfy_table::Table::new();
+        total_table.load_preset(comfy_table::presets::UTF8_FULL);
+        total_table
+            .set_header(vec!["Category".to_string(), "Amount".to_string()])
+            .add_row(vec![
+                "Public Mint".to_string(),
+                format!("{} QDUM", total_minted_qdum as u64).bright_green().to_string()
+            ])
+            .add_row(vec![
+                "Airdrops".to_string(),
+                format!("{} QDUM", airdrop_distributed_qdum as u64).bright_yellow().to_string()
+            ])
+            .add_row(vec![
+                "Total Circulating".to_string(),
+                format!("{} QDUM ({:.2}%)", combined_minted_qdum as u64, total_percent).bright_cyan().to_string()
+            ])
+            .add_row(vec![
+                "Max Supply".to_string(),
+                format!("{} QDUM", total_supply_qdum as u64).dimmed().to_string()
+            ]);
+
+        println!("{}", total_table);
+        println!();
+
+        // Next tier info: (threshold %, next multiplier, threshold value for calculation)
+        // At 0-10%: 3x, next tier at >10% is 5x
+        // At 10-25%: 5x, next tier at >25% is 8x
+        // etc.
+        let next_tier_info = match public_percent {
+            p if p <= 10.0 => ("10%", "5x", 10.0),    // At 3x now, 5x starts after 10%
+            p if p <= 25.0 => ("25%", "8x", 25.0),    // At 5x now, 8x starts after 25%
+            p if p <= 45.0 => ("45%", "12x", 45.0),   // At 8x now, 12x starts after 45%
+            p if p <= 60.0 => ("60%", "15x", 60.0),   // At 12x now, 15x starts after 60%
+            p if p <= 70.0 => ("70%", "20x", 70.0),   // At 15x now, 20x starts after 70%
+            _ => ("N/A", "20x (max)", 100.0),
+        };
+
+        if public_percent < 100.0 && public_percent < 70.0 {
+            let tokens_to_next = ((next_tier_info.2 / 100.0 * PUBLIC_MINT_SUPPLY as f64) - total_minted as f64) / 1_000_000.0;
+            let tokens_to_next_u64 = tokens_to_next.max(0.0) as u64;
+            println!("{} Next tier at {} supply ({} multiplier)", "⚡".yellow(), next_tier_info.0.bright_cyan(), next_tier_info.1.bright_magenta());
+            println!("  {} QDUM needed to reach next tier", format!("{}", tokens_to_next_u64).yellow());
+        } else if public_percent >= 70.0 {
+            println!("{} {} Maximum tier reached!", "✨".bright_yellow(), "20x".bright_magenta().bold());
+        }
+
         println!();
 
         Ok(())
