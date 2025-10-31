@@ -123,6 +123,21 @@ enum Commands {
         #[arg(long, default_value = "3V6ogu16de86nChsmC5wHMKJmCx5YdGXA6fbp3y3497n")]
         mint: String,
     },
+
+    /// Mint QDUM tokens (free mint with progressive fee)
+    Mint {
+        /// Path to your Solana wallet keypair JSON file (optional, uses configured path or ~/.config/solana/id.json)
+        #[arg(long)]
+        keypair: Option<String>,
+
+        /// Amount of QDUM tokens to mint (10,000 to 50,000)
+        #[arg(long)]
+        amount: u64,
+
+        /// Mint address (defaults to QDUM devnet mint)
+        #[arg(long, default_value = "3V6ogu16de86nChsmC5wHMKJmCx5YdGXA6fbp3y3497n")]
+        mint: String,
+    },
 }
 
 fn get_styles() -> clap::builder::Styles {
@@ -382,6 +397,26 @@ async fn main() -> Result<()> {
 
             cmd_balance(&cli.rpc_url, wallet_pubkey, mint_pubkey).await?;
         }
+
+        Commands::Mint { keypair, amount, mint } => {
+            println!("{}", "🪙 Quantdum Vault - Mint QDUM Tokens".bold().cyan());
+            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
+            println!();
+
+            let program_id = Pubkey::from_str(&cli.program_id)?;
+
+            // Auto-detect keypair and wallet
+            let keypair_path = keypair.unwrap_or_else(|| get_default_keypair_path());
+            let (kp_path, wallet_pubkey) = load_keypair_and_extract_wallet(&keypair_path)?;
+
+            println!("{} {}", "Using keypair:".bold(), kp_path.dimmed());
+            println!("{} {}", "Wallet:       ".bold(), wallet_pubkey.to_string().yellow());
+            println!();
+
+            let mint_pubkey = Pubkey::from_str(&mint)?;
+
+            cmd_mint(&cli.rpc_url, program_id, wallet_pubkey, &kp_path, mint_pubkey, amount).await?;
+        }
     }
 
     Ok(())
@@ -563,6 +598,60 @@ async fn cmd_status(rpc_url: &str, program_id: Pubkey, wallet: Pubkey) -> Result
 
 async fn cmd_balance(rpc_url: &str, wallet: Pubkey, mint: Pubkey) -> Result<()> {
     let client = VaultClient::new(rpc_url, Pubkey::default())?;
+    client.check_balance(wallet, mint).await?;
+
+    Ok(())
+}
+
+async fn cmd_mint(
+    rpc_url: &str,
+    program_id: Pubkey,
+    wallet: Pubkey,
+    keypair_path: &str,
+    mint: Pubkey,
+    amount: u64,
+) -> Result<()> {
+
+    // Validate amount is in the correct range (10,000 to 50,000 QDUM in base units)
+    const MIN_MINT_AMOUNT: u64 = 10_000_000_000; // 10,000 QDUM * 10^6
+    const MAX_MINT_AMOUNT: u64 = 50_000_000_000; // 50,000 QDUM * 10^6
+
+    if amount < MIN_MINT_AMOUNT || amount > MAX_MINT_AMOUNT {
+        println!("{}", "❌ Invalid mint amount!".red().bold());
+        println!();
+        println!("Amount must be between {} and {} (in base units with 6 decimals)",
+            MIN_MINT_AMOUNT.to_string().yellow(),
+            MAX_MINT_AMOUNT.to_string().yellow());
+        println!();
+        println!("For reference:");
+        println!("  {} base units = {} QDUM", "10000000000".cyan(), "10,000".green());
+        println!("  {} base units = {} QDUM", "50000000000".cyan(), "50,000".green());
+        return Ok(());
+    }
+
+    let data = fs::read_to_string(keypair_path)
+        .context(format!("Failed to read keypair file: {}", keypair_path))?;
+    let bytes: Vec<u8> = serde_json::from_str(&data)
+        .context("Invalid keypair JSON format")?;
+    let keypair = Keypair::try_from(&bytes[..])
+        .context("Invalid keypair bytes")?;
+
+    println!("{} {}", "Amount:".bold(), format!("{} base units", amount).yellow());
+    println!("{} {}", "Mint:  ".bold(), mint.to_string().cyan());
+    println!();
+
+    // Display estimated fee
+    let amount_in_qdum = amount as f64 / 1_000_000.0;
+    println!("{}", "⚠️  Note: Progressive fees apply based on scarcity".yellow());
+    println!("   Minting {} QDUM will incur a SOL fee", amount_in_qdum.to_string().cyan());
+    println!();
+
+    let client = VaultClient::new(rpc_url, program_id)?;
+    client.mint_tokens(&keypair, mint, amount).await?;
+
+    // Show updated balance
+    println!("Fetching updated balance...");
+    println!();
     client.check_balance(wallet, mint).await?;
 
     Ok(())

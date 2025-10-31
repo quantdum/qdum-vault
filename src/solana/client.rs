@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::{ProgressBar, ProgressStyle};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
@@ -828,7 +828,7 @@ impl VaultClient {
 
         // Parse account data (assuming public_key Vec<u8> with length = 0)
         // Layout: discriminator(8) + owner(32) + algorithm(1) + pubkey_len(4) + tokens_locked(1) + unlock_challenge(32) + ...
-        let owner_pubkey = &account_info.data[8..40];
+        let _owner_pubkey = &account_info.data[8..40];
         let algorithm = account_info.data[40];
         let pubkey_len = u32::from_le_bytes(account_info.data[41..45].try_into().unwrap());
         let tokens_locked_offset = 45 + pubkey_len as usize;
@@ -904,6 +904,93 @@ impl VaultClient {
             }
         }
 
+        println!();
+
+        Ok(())
+    }
+
+    /// Mint QDUM tokens
+    pub async fn mint_tokens(
+        &self,
+        keypair: &Keypair,
+        mint: Pubkey,
+        amount: u64,
+    ) -> Result<()> {
+        use solana_sdk::instruction::Instruction;
+
+        // Free mint instruction discriminator (from Anchor IDL)
+        const FREE_MINT_DISCRIMINATOR: [u8; 8] = [164, 250, 205, 24, 232, 61, 200, 237];
+
+        // Derive PDAs
+        let (mint_state, _) = Pubkey::find_program_address(
+            &[b"state"],
+            &self.program_id,
+        );
+
+        let (mint_tracker, _) = Pubkey::find_program_address(
+            &[b"mint_tracker", keypair.pubkey().as_ref()],
+            &self.program_id,
+        );
+
+        let (mint_authority, _) = Pubkey::find_program_address(
+            &[b"mint_authority"],
+            &self.program_id,
+        );
+
+        // Get user's token account (ATA)
+        let user_token_account = get_associated_token_address(
+            &keypair.pubkey(),
+            &mint,
+            &TOKEN_2022_PROGRAM_ID,
+        );
+
+        // Get mint state to find dev wallet
+        let mint_state_account = self.rpc_client.get_account(&mint_state)
+            .context("Mint state not found - program may not be initialized")?;
+
+        // Parse dev_wallet from mint_state (offset 41 for 32-byte pubkey)
+        let dev_wallet = Pubkey::try_from(&mint_state_account.data[41..73])
+            .context("Failed to parse dev wallet from mint state")?;
+
+        // Build instruction data: discriminator + amount (u64)
+        let mut instruction_data = Vec::new();
+        instruction_data.extend_from_slice(&FREE_MINT_DISCRIMINATOR);
+        instruction_data.extend_from_slice(&amount.to_le_bytes());
+
+        // Build accounts list
+        let accounts = vec![
+            solana_sdk::instruction::AccountMeta::new(keypair.pubkey(), true),
+            solana_sdk::instruction::AccountMeta::new(mint_state, false),
+            solana_sdk::instruction::AccountMeta::new(mint_tracker, false),
+            solana_sdk::instruction::AccountMeta::new_readonly(mint_authority, false),
+            solana_sdk::instruction::AccountMeta::new(mint, false),
+            solana_sdk::instruction::AccountMeta::new(user_token_account, false),
+            solana_sdk::instruction::AccountMeta::new(dev_wallet, false),
+            solana_sdk::instruction::AccountMeta::new_readonly(TOKEN_2022_PROGRAM_ID, false),
+            solana_sdk::instruction::AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+        ];
+
+        let instruction = Instruction {
+            program_id: self.program_id,
+            accounts,
+            data: instruction_data,
+        };
+
+        let recent_blockhash = self.rpc_client.get_latest_blockhash()?;
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&keypair.pubkey()),
+            &[keypair],
+            recent_blockhash,
+        );
+
+        println!("Sending mint transaction...");
+        let signature = self.rpc_client.send_and_confirm_transaction(&transaction)?;
+
+        println!();
+        println!("{}", "✅ Tokens Minted Successfully!".green().bold());
+        println!("   Transaction: {}", signature.to_string().cyan());
+        println!("   View on Solscan: https://solscan.io/tx/{}?cluster=devnet", signature);
         println!();
 
         Ok(())

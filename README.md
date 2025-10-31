@@ -7,6 +7,7 @@ Command-line tool for managing your quantum-resistant Quantdum token vault.
 - 🔐 **SPHINCS+-SHA2-128s** post-quantum signatures (NIST FIPS 205)
 - 🔒 **Vault Locking** with cryptographic challenges
 - ✅ **11-Step Verification** for on-chain signature validation
+- 🪙 **Token Minting** with progressive fee structure
 - 🌐 **Solana Integration** via RPC (devnet/mainnet)
 
 ## Prerequisites
@@ -125,9 +126,21 @@ qdum-vault status --wallet YOUR_WALLET_ADDRESS
 ### 6. Check Balance
 ```bash
 qdum-vault balance \
-  --wallet YOUR_WALLET_ADDRESS \
-  --mint MINT_ADDRESS
+  --keypair ~/.config/solana/id.json \
+  --mint 3V6ogu16de86nChsmC5wHMKJmCx5YdGXA6fbp3y3497n
 ```
+
+### 7. Mint QDUM Tokens
+```bash
+qdum-vault mint \
+  --amount 10000000000 \
+  --keypair ~/.config/solana/id.json
+```
+
+Mint QDUM tokens with progressive fees:
+- Amount range: 10,000 to 50,000 QDUM (in base units with 6 decimals)
+- Example: 10,000 QDUM = 10000000000 base units
+- Fees increase based on scarcity (how much has been minted)
 
 ## Configuration
 
