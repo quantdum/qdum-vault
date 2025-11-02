@@ -141,6 +141,25 @@ enum Commands {
 
     /// Check mint status and public supply statistics
     MintStatus,
+
+    /// Transfer QDUM tokens to another wallet
+    Transfer {
+        /// Path to your Solana wallet keypair JSON file (optional, uses configured path or ~/.config/solana/id.json)
+        #[arg(long)]
+        keypair: Option<String>,
+
+        /// Recipient wallet address
+        #[arg(long)]
+        to: String,
+
+        /// Amount of QDUM tokens to transfer (in base units with 6 decimals)
+        #[arg(long)]
+        amount: u64,
+
+        /// Mint address (defaults to QDUM devnet mint)
+        #[arg(long, default_value = "3V6ogu16de86nChsmC5wHMKJmCx5YdGXA6fbp3y3497n")]
+        mint: String,
+    },
 }
 
 fn get_styles() -> clap::builder::Styles {
@@ -430,6 +449,27 @@ async fn main() -> Result<()> {
 
             cmd_mint_status(&cli.rpc_url, program_id).await?;
         }
+
+        Commands::Transfer { keypair, to, amount, mint } => {
+            println!("{}", "💸 Quantdum Vault - Transfer QDUM Tokens".bold().cyan());
+            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
+            println!();
+
+            let program_id = Pubkey::from_str(&cli.program_id)?;
+
+            // Auto-detect keypair and wallet
+            let keypair_path = keypair.unwrap_or_else(|| get_default_keypair_path());
+            let (kp_path, wallet_pubkey) = load_keypair_and_extract_wallet(&keypair_path)?;
+
+            println!("{} {}", "Using keypair:".bold(), kp_path.dimmed());
+            println!("{} {}", "From:         ".bold(), wallet_pubkey.to_string().yellow());
+            println!();
+
+            let recipient = Pubkey::from_str(&to)?;
+            let mint_pubkey = Pubkey::from_str(&mint)?;
+
+            cmd_transfer(&cli.rpc_url, program_id, wallet_pubkey, &kp_path, recipient, mint_pubkey, amount).await?;
+        }
     }
 
     Ok(())
@@ -666,6 +706,29 @@ async fn cmd_mint(
 async fn cmd_mint_status(rpc_url: &str, program_id: Pubkey) -> Result<()> {
     let client = VaultClient::new(rpc_url, program_id)?;
     client.get_mint_status().await?;
+
+    Ok(())
+}
+
+async fn cmd_transfer(
+    rpc_url: &str,
+    program_id: Pubkey,
+    from_wallet: Pubkey,
+    keypair_path: &str,
+    to_wallet: Pubkey,
+    mint: Pubkey,
+    amount: u64,
+) -> Result<()> {
+    let client = VaultClient::new(rpc_url, program_id)?;
+
+    let data = fs::read_to_string(keypair_path)
+        .context(format!("Failed to read keypair file: {}", keypair_path))?;
+    let bytes: Vec<u8> = serde_json::from_str(&data)
+        .context("Invalid keypair JSON format")?;
+    let keypair = Keypair::try_from(&bytes[..])
+        .context("Invalid keypair bytes")?;
+
+    client.transfer_tokens(&keypair, to_wallet, mint, amount).await?;
 
     Ok(())
 }

@@ -1120,6 +1120,225 @@ impl VaultClient {
         Ok(())
     }
 
+    /// Transfer QDUM tokens to another wallet
+    pub async fn transfer_tokens(
+        &self,
+        keypair: &Keypair,
+        recipient: Pubkey,
+        mint: Pubkey,
+        amount: u64,
+    ) -> Result<()> {
+        use solana_sdk::instruction::Instruction;
+        use std::io::{self, Write};
+
+        println!("To:           {}", recipient.to_string().cyan());
+        println!("Amount:       {} base units ({} QDUM)", amount.to_string().yellow(), (amount as f64 / 1_000_000.0).to_string().green());
+        println!("Mint:         {}", mint.to_string().cyan());
+        println!();
+
+        // Get sender and recipient token accounts (ATAs)
+        let sender_token_account = get_associated_token_address(
+            &keypair.pubkey(),
+            &mint,
+            &TOKEN_2022_PROGRAM_ID,
+        );
+
+        let recipient_token_account = get_associated_token_address(
+            &recipient,
+            &mint,
+            &TOKEN_2022_PROGRAM_ID,
+        );
+
+        // Derive PQ account PDA for sender (for transfer hook validation)
+        let (pq_account, _) = self.derive_pq_account(keypair.pubkey());
+
+        // Check if sender account has sufficient balance
+        let sender_account_info = self.rpc_client.get_account(&sender_token_account)
+            .context("Sender token account not found! You don't have any tokens to transfer.")?;
+
+        let current_balance = u64::from_le_bytes(sender_account_info.data[64..72].try_into().unwrap());
+        let balance_qdum = current_balance as f64 / 1_000_000.0;
+
+        println!("{}", "╔═══════════════════════════════════════════════════════════╗".bright_cyan());
+        println!("{}", "║                  TRANSFER SUMMARY                         ║".bright_cyan().bold());
+        println!("{}", "╚═══════════════════════════════════════════════════════════╝".bright_cyan());
+        println!();
+        println!("{} {}", "Your Balance:".bold(), format!("{} QDUM", balance_qdum).green());
+        println!("{} {}", "Transfer Amount:".bold(), format!("{} QDUM", amount as f64 / 1_000_000.0).yellow());
+        println!("{} {}", "Remaining:".bold(), format!("{} QDUM", (current_balance - amount) as f64 / 1_000_000.0).cyan());
+        println!();
+
+        if current_balance < amount {
+            println!("{}", "❌ Insufficient balance!".red().bold());
+            return Ok(());
+        }
+
+        // Check if PQ account exists and is locked
+        if let Ok(pq_account_info) = self.rpc_client.get_account(&pq_account) {
+            let pubkey_len = u32::from_le_bytes(pq_account_info.data[41..45].try_into().unwrap());
+            let tokens_locked_offset = 45 + pubkey_len as usize;
+            let is_locked = pq_account_info.data[tokens_locked_offset] == 1;
+
+            if is_locked {
+                println!("{}", "⚠️  Your vault is LOCKED!".red().bold());
+                println!();
+                println!("Transfers are disabled while your vault is locked.");
+                println!("To unlock your vault, run: qdum-vault unlock");
+                println!();
+                return Ok(());
+            } else {
+                println!("{}", "✓ Vault is unlocked - transfer allowed".green());
+                println!();
+            }
+        } else {
+            println!("{}", "ℹ  No PQ account found - proceeding with normal transfer".dimmed());
+            println!();
+        }
+
+        // Confirmation prompt
+        print!("{}", "Proceed with transfer? (y/n): ".bright_green().bold());
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let answer = input.trim().to_lowercase();
+
+        if answer != "y" && answer != "yes" {
+            println!();
+            println!("{}", "❌ Transfer cancelled".red());
+            return Ok(());
+        }
+
+        println!();
+
+        // Build transaction with ComputeBudget instructions (like Phantom does)
+        let mut instructions = Vec::new();
+
+        // Add ComputeBudget instructions to request more compute units
+        // Phantom uses: setComputeUnitLimit (200,000) and setComputeUnitPrice
+        use solana_sdk::compute_budget::ComputeBudgetInstruction;
+
+        instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(200_000));
+        instructions.push(ComputeBudgetInstruction::set_compute_unit_price(200_000));
+
+        // Check if recipient ATA exists, create if not
+        match self.rpc_client.get_account(&recipient_token_account) {
+            Ok(_) => {
+                println!("Recipient token account exists: {}", recipient_token_account.to_string().cyan());
+            }
+            Err(_) => {
+                println!("Creating recipient token account...");
+
+                // Associated Token Program ID
+                const ASSOCIATED_TOKEN_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+
+                let create_ata_ix = Instruction {
+                    program_id: ASSOCIATED_TOKEN_PROGRAM_ID,
+                    accounts: vec![
+                        solana_sdk::instruction::AccountMeta::new(keypair.pubkey(), true),
+                        solana_sdk::instruction::AccountMeta::new(recipient_token_account, false),
+                        solana_sdk::instruction::AccountMeta::new_readonly(recipient, false),
+                        solana_sdk::instruction::AccountMeta::new_readonly(mint, false),
+                        solana_sdk::instruction::AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+                        solana_sdk::instruction::AccountMeta::new_readonly(TOKEN_2022_PROGRAM_ID, false),
+                    ],
+                    data: vec![],
+                };
+
+                instructions.push(create_ata_ix);
+            }
+        }
+
+        // Build standard Token-2022 TransferChecked instruction
+        // According to SPL Transfer Hook docs, we need to:
+        // 1. Create base TransferChecked instruction (4 accounts)
+        // 2. Read and resolve extra accounts from ExtraAccountMetaList PDA
+        // 3. Append those accounts to the instruction
+
+        let mut instruction_data = Vec::new();
+        instruction_data.push(12); // TransferChecked discriminator
+        instruction_data.extend_from_slice(&amount.to_le_bytes());
+        instruction_data.push(6); // decimals
+
+        // Build TransferChecked accounts following Token-2022 spec
+        // Analyzed from Phantom's successful transaction (2uhKM7acwx3Z...):
+        // Account order for TransferChecked with transfer hook:
+        // 0: source_account (writable)
+        // 1: mint (read-only)
+        // 2: destination_account (writable)
+        // 3: owner/authority (signer)
+        // 4: transfer_hook_program_id (read-only) ← CRITICAL! Token-2022 needs this to invoke the hook
+        // 5: extra_account_metas_pda (read-only)
+        // 6: pq_account (read-only)
+
+        let (extra_account_meta_list, _) = Pubkey::find_program_address(
+            &[b"extra-account-metas", mint.as_ref()],
+            &self.program_id,
+        );
+
+        let accounts = vec![
+            solana_sdk::instruction::AccountMeta::new(sender_token_account, false),           // 0: source
+            solana_sdk::instruction::AccountMeta::new_readonly(mint, false),                  // 1: mint
+            solana_sdk::instruction::AccountMeta::new(recipient_token_account, false),        // 2: destination
+            solana_sdk::instruction::AccountMeta::new_readonly(keypair.pubkey(), true),       // 3: owner (signer)
+            solana_sdk::instruction::AccountMeta::new_readonly(self.program_id, false),       // 4: transfer hook program
+            solana_sdk::instruction::AccountMeta::new_readonly(extra_account_meta_list, false), // 5: extra metas PDA
+            solana_sdk::instruction::AccountMeta::new_readonly(pq_account, false),            // 6: PQ account
+        ];
+
+        let transfer_ix = Instruction {
+            program_id: TOKEN_2022_PROGRAM_ID,
+            accounts,
+            data: instruction_data,
+        };
+
+        instructions.push(transfer_ix);
+
+        let recent_blockhash = self.rpc_client.get_latest_blockhash()?;
+        let transaction = Transaction::new_signed_with_payer(
+            &instructions,
+            Some(&keypair.pubkey()),
+            &[keypair],
+            recent_blockhash,
+        );
+
+        // Progress bar
+        let pb = ProgressBar::new(3);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.cyan} [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+                .unwrap()
+                .progress_chars("━━╸")
+        );
+
+        pb.set_message(format!("{}", "Building transaction...".bright_white()));
+        pb.inc(1);
+
+        pb.set_message(format!("{}", "Sending to network...".bright_white()));
+        let signature = self.rpc_client.send_and_confirm_transaction(&transaction)?;
+        pb.inc(1);
+
+        pb.set_message(format!("{}", "Confirming...".bright_white()));
+        pb.inc(1);
+
+        pb.finish_with_message(format!("{}", "✓ Transaction confirmed".bright_green()));
+        println!();
+
+        println!();
+        println!("{}", "╔═══════════════════════════════════════════════════════════╗".bright_green());
+        println!("{}", "║            ✅ TRANSFER SUCCESSFUL                         ║".bright_green().bold());
+        println!("{}", "╚═══════════════════════════════════════════════════════════╝".bright_green());
+        println!();
+        println!("{} {}", "   Amount:     ".bold(), format!("{} QDUM", amount as f64 / 1_000_000.0).bright_green());
+        println!("{} {}", "   Recipient:  ".bold(), recipient.to_string().bright_cyan());
+        println!("{} {}", "   Transaction:".bold(), signature.to_string().cyan());
+        println!();
+        println!("{}", format!("   View on Solscan: https://solscan.io/tx/{}?cluster=devnet", signature).dimmed());
+        println!();
+
+        Ok(())
+    }
+
     /// Get mint status and display public supply statistics
     pub async fn get_mint_status(&self) -> Result<()> {
         const PUBLIC_MINT_SUPPLY: u64 = 3_092_376_853_000_000; // 3,092,376,853 QDUM (72%)
