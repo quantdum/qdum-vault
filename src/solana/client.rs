@@ -910,30 +910,42 @@ impl VaultClient {
     }
 
     /// Calculate scarcity multiplier (matches on-chain calculation)
+    /// Scenario A: Progressive multipliers for $2.5M protocol revenue
+    /// Target: $100 per user (0.667 SOL @ $150/SOL) for 123,695 QDUM
+    ///
+    /// Uses 10x scaling to handle decimal multipliers:
+    /// - 0.75× = 7 (will divide by 10 in fee calculation)
+    /// - 1.5×  = 15
+    /// - 2.5×  = 25
+    /// - 4×    = 40
     fn calculate_scarcity_multiplier(total_minted: u64) -> u64 {
         const PUBLIC_MINT_SUPPLY: u64 = 3_092_376_853_000_000; // 3,092,376,853 QDUM (72% of total)
         let percent_minted = (total_minted as u128 * 100) / PUBLIC_MINT_SUPPLY as u128;
 
-        if percent_minted <= 10 { return 3; }
-        if percent_minted <= 25 { return 5; }
-        if percent_minted <= 45 { return 8; }
-        if percent_minted <= 60 { return 12; }
-        if percent_minted <= 70 { return 15; }
-        20 // 71-100%
+        if percent_minted <= 25 { return 7; }   // 0.75× (rounded to 0.7 for simplicity)
+        if percent_minted <= 50 { return 15; }  // 1.5×
+        if percent_minted <= 75 { return 25; }  // 2.5×
+        40 // 4× for 76-100%
     }
 
     /// Calculate mint fee in lamports (matches on-chain calculation)
+    /// Scenario A: Progressive fee structure for $2.5M protocol revenue
+    ///
+    /// Formula tuned for ~$100 per user (0.667 SOL @ $150/SOL) for 123,695 QDUM
+    /// Multiplier uses 10x scaling, so final_fee = (base × multiplier) / 10
     fn calculate_mint_fee(amount: u64, total_minted: u64) -> u64 {
         const BASE_FEE_LAMPORTS: u64 = 1_000_000; // 0.001 SOL
+        const BASE_DIVISOR: u64 = 399_156_938; // Calibrated for Scenario A fee targets
 
-        // Base fee: amount / 1000 tokens * 0.001 SOL
+        // Base fee: (amount / 406,000 tokens) × 0.001 SOL
         let base_fee = amount
             .saturating_mul(BASE_FEE_LAMPORTS)
-            .saturating_div(1_000_000_000);
+            .saturating_div(BASE_DIVISOR);
 
         let multiplier = Self::calculate_scarcity_multiplier(total_minted);
 
-        base_fee.saturating_mul(multiplier)
+        // Multiply by scarcity multiplier, then divide by 10 to handle decimal scaling
+        base_fee.saturating_mul(multiplier).saturating_div(10)
     }
 
     /// Mint QDUM tokens
@@ -1001,7 +1013,7 @@ impl VaultClient {
         println!();
         println!("{} {}", "Minting Amount:".bold(), format!("{} QDUM", amount_in_qdum).yellow());
         println!("{} {}", "Current Supply:".bold(), format!("{:.2}%", (total_minted as f64 / 2_150_000_000_000_000.0) * 100.0).cyan());
-        println!("{} {}", "Scarcity Tier: ".bold(), format!("{}x", multiplier).bright_magenta());
+        println!("{} {}", "Scarcity Tier: ".bold(), format!("{:.1}x", multiplier as f64 / 10.0).bright_magenta());
         println!("{} {}", "Mint Fee:      ".bold(), format!("{:.6} SOL", fee_sol).bright_yellow().bold());
         println!();
 
@@ -1425,7 +1437,7 @@ impl VaultClient {
             ])
             .add_row(vec![
                 "Current Tier".to_string(),
-                format!("{}x multiplier", multiplier).bright_blue().to_string()
+                format!("{:.1}x multiplier", multiplier as f64 / 10.0).bright_blue().to_string()
             ]);
 
         println!("{}", table);
@@ -1465,25 +1477,25 @@ impl VaultClient {
         println!();
 
         // Next tier info: (threshold %, next multiplier, threshold value for calculation)
-        // At 0-10%: 3x, next tier at >10% is 5x
-        // At 10-25%: 5x, next tier at >25% is 8x
-        // etc.
+        // Scenario A: Progressive multipliers
+        // At 0-25%: 0.7x, next tier at >25% is 1.5x
+        // At 26-50%: 1.5x, next tier at >50% is 2.5x
+        // At 51-75%: 2.5x, next tier at >75% is 4x
+        // At 76-100%: 4x (max)
         let next_tier_info = match public_percent {
-            p if p <= 10.0 => ("10%", "5x", 10.0),    // At 3x now, 5x starts after 10%
-            p if p <= 25.0 => ("25%", "8x", 25.0),    // At 5x now, 8x starts after 25%
-            p if p <= 45.0 => ("45%", "12x", 45.0),   // At 8x now, 12x starts after 45%
-            p if p <= 60.0 => ("60%", "15x", 60.0),   // At 12x now, 15x starts after 60%
-            p if p <= 70.0 => ("70%", "20x", 70.0),   // At 15x now, 20x starts after 70%
-            _ => ("N/A", "20x (max)", 100.0),
+            p if p <= 25.0 => ("25%", "1.5x", 25.0),   // At 0.7x now, 1.5x starts after 25%
+            p if p <= 50.0 => ("50%", "2.5x", 50.0),   // At 1.5x now, 2.5x starts after 50%
+            p if p <= 75.0 => ("75%", "4x", 75.0),     // At 2.5x now, 4x starts after 75%
+            _ => ("N/A", "4x (max)", 100.0),
         };
 
-        if public_percent < 100.0 && public_percent < 70.0 {
+        if public_percent < 100.0 && public_percent < 75.0 {
             let tokens_to_next = ((next_tier_info.2 / 100.0 * PUBLIC_MINT_SUPPLY as f64) - total_minted as f64) / 1_000_000.0;
             let tokens_to_next_u64 = tokens_to_next.max(0.0) as u64;
             println!("{} Next tier at {} supply ({} multiplier)", "⚡".yellow(), next_tier_info.0.bright_cyan(), next_tier_info.1.bright_magenta());
             println!("  {} QDUM needed to reach next tier", format!("{}", tokens_to_next_u64).yellow());
-        } else if public_percent >= 70.0 {
-            println!("{} {} Maximum tier reached!", "✨".bright_yellow(), "20x".bright_magenta().bold());
+        } else if public_percent >= 75.0 {
+            println!("{} {} Maximum tier reached!", "✨".bright_yellow(), "4x".bright_magenta().bold());
         }
 
         println!();
