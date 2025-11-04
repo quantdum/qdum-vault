@@ -178,8 +178,21 @@ fn print_banner() {
     // Animated scanline effect
     println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_magenta());
     thread::sleep(Duration::from_millis(30));
-    println!("{}", "║ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ ║".on_black().bright_magenta());
-    thread::sleep(Duration::from_millis(30));
+
+    // Animated wave scanline - moves left to right
+    for frame in 0..3 {
+        let scanline = match frame {
+            0 => "║▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ║",
+            1 => "║ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒ ║",
+            _ => "║░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓ ║",
+        };
+        if frame > 0 {
+            print!("\x1B[1A\r");
+        }
+        println!("{}", scanline.on_black().bright_magenta());
+        io::stdout().flush().unwrap();
+        thread::sleep(Duration::from_millis(80));
+    }
 
     // Matrix-style reveal of logo lines
     let logo_lines = vec![
@@ -196,26 +209,52 @@ fn print_banner() {
         thread::sleep(Duration::from_millis(40));
     }
 
-    println!("{}", "║ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ ║".on_black().bright_magenta());
-    thread::sleep(Duration::from_millis(30));
+    // Animated bottom scanline with different pattern
+    for frame in 0..3 {
+        let scanline = match frame {
+            0 => "║░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░ ║",
+            1 => "║ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█  ║",
+            _ => "║█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓ ║",
+        };
+        if frame > 0 {
+            print!("\x1B[1A\r");
+        }
+        println!("{}", scanline.on_black().bright_magenta());
+        io::stdout().flush().unwrap();
+        thread::sleep(Duration::from_millis(80));
+    }
 
-    // Pulsing title
-    for i in 0..2 {
+    // Pulsing title with more dramatic effect
+    for i in 0..3 {
         if i % 2 == 0 {
             println!("{}", "║          ⚛️  Q U A N T U M   V A U L T  ⚛️              ║".on_black().bright_magenta().bold());
         } else {
             println!("{}", "║          ⚛️  Q U A N T U M   V A U L T  ⚛️              ║".on_black().bright_cyan().bold());
         }
-        if i < 1 {
-            thread::sleep(Duration::from_millis(200));
+        if i < 2 {
+            thread::sleep(Duration::from_millis(180));
             print!("\x1B[1A\r");
         }
     }
 
     println!("{}", "║              [ SPHINCS+ POST-QUANTUM ]                    ║".on_black().bright_green());
     thread::sleep(Duration::from_millis(30));
-    println!("{}", "║ ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ ║".on_black().bright_magenta());
-    thread::sleep(Duration::from_millis(30));
+
+    // Animated closing scanline with pulsing effect
+    for frame in 0..3 {
+        let scanline = match frame {
+            0 => "║░░▒▒▓▓██ ░░▒▒▓▓██ ░░▒▒▓▓██ ░░▒▒▓▓██ ░░▒▒▓▓██ ░░▒▒▓▓██ ░░║",
+            1 => "║▒▒▓▓██░░ ▒▒▓▓██░░ ▒▒▓▓██░░ ▒▒▓▓██░░ ▒▒▓▓██░░ ▒▒▓▓██░░ ▒║",
+            _ => "║▓▓██░░▒▒ ▓▓██░░▒▒ ▓▓██░░▒▒ ▓▓██░░▒▒ ▓▓██░░▒▒ ▓▓██░░▒▒ ▓║",
+        };
+        if frame > 0 {
+            print!("\x1B[1A\r");
+        }
+        println!("{}", scanline.on_black().bright_magenta());
+        io::stdout().flush().unwrap();
+        thread::sleep(Duration::from_millis(80));
+    }
+
     println!("{}", "╚═══════════════════════════════════════════════════════════╝".on_black().bright_magenta());
     println!();
 
