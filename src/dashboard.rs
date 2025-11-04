@@ -191,21 +191,12 @@ impl Dashboard {
                 self.status_message = None;
             }
             AppMode::RegisterPopup | AppMode::LockPopup | AppMode::UnlockPopup => {
-                // In action popups, Esc cancels, Enter confirms/continues
+                // In action popups, only Esc closes (actions auto-execute)
                 match code {
                     KeyCode::Esc => {
                         self.mode = AppMode::Normal;
                         self.action_steps.clear();
-                        self.status_message = Some("Action cancelled".to_string());
-                    }
-                    KeyCode::Enter => {
-                        // Execute the action based on current mode
-                        match self.mode {
-                            AppMode::RegisterPopup => self.perform_register_action(),
-                            AppMode::LockPopup => self.perform_lock_action(),
-                            AppMode::UnlockPopup => self.perform_unlock_action(),
-                            _ => {}
-                        }
+                        self.status_message = Some("Popup closed".to_string());
                     }
                     _ => {}
                 }
@@ -278,21 +269,27 @@ impl Dashboard {
         self.mode = AppMode::RegisterPopup;
         self.action_steps.clear();
         self.action_steps.push(ActionStep::Starting);
-        self.status_message = Some("Opening Register wizard...".to_string());
+        self.status_message = Some("Executing Register...".to_string());
+        // Execute immediately
+        self.perform_register_action();
     }
 
     fn execute_lock(&mut self) {
         self.mode = AppMode::LockPopup;
         self.action_steps.clear();
         self.action_steps.push(ActionStep::Starting);
-        self.status_message = Some("Opening Lock wizard...".to_string());
+        self.status_message = Some("Executing Lock...".to_string());
+        // Execute immediately
+        self.perform_lock_action();
     }
 
     fn execute_unlock(&mut self) {
         self.mode = AppMode::UnlockPopup;
         self.action_steps.clear();
         self.action_steps.push(ActionStep::Starting);
-        self.status_message = Some("Opening Unlock wizard...".to_string());
+        self.status_message = Some("Executing Unlock...".to_string());
+        // Execute immediately
+        self.perform_unlock_action();
     }
 
     fn perform_register_action(&mut self) {
@@ -807,23 +804,13 @@ impl Dashboard {
             }
         }
 
-        // Add instructions
+        // Add instructions - always show close button since we auto-execute
         text_lines.push(Line::from(""));
         text_lines.push(Line::from(""));
-
-        if matches!(self.action_steps.last(), Some(ActionStep::Starting)) {
-            text_lines.push(Line::from(vec![
-                Span::styled("[Enter]", Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)),
-                Span::raw(" Execute  "),
-                Span::styled("[Esc]", Style::default().fg(Color::Black).bg(Color::Red).add_modifier(Modifier::BOLD)),
-                Span::raw(" Cancel"),
-            ]));
-        } else {
-            text_lines.push(Line::from(vec![
-                Span::styled("[Esc]", Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)),
-                Span::raw(" Close"),
-            ]));
-        }
+        text_lines.push(Line::from(vec![
+            Span::styled("[Esc]", Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::raw(" Close"),
+        ]));
 
         let popup_paragraph = Paragraph::new(text_lines)
             .block(
