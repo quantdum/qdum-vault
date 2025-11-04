@@ -157,25 +157,124 @@ fn get_styles() -> clap::builder::Styles {
 }
 
 fn print_banner() {
+    use std::io::{self, Write};
+    use std::thread;
+
     println!();
+
+    // Glitch effect intro
+    for _ in 0..3 {
+        print!("\r{}", "█░▒▓▒░█ INITIALIZING ░█░▒▓▒░█".on_black().bright_magenta().blink());
+        io::stdout().flush().unwrap();
+        thread::sleep(Duration::from_millis(80));
+        print!("\r{}", "▓░▒█░▒▓ INITIALIZING ▓░▒█░▒▓".on_black().bright_cyan().blink());
+        io::stdout().flush().unwrap();
+        thread::sleep(Duration::from_millis(80));
+    }
+    print!("\r{}", " ".repeat(50));
+    print!("\r");
+    io::stdout().flush().unwrap();
+
+    // Animated scanline effect
     println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_magenta());
-    println!("{}", "║                                                           ║".on_black().bright_magenta());
-    println!("{}", "║   ██████╗ ██████╗ ██╗   ██╗███╗   ███╗                   ║".on_black().bright_cyan().bold());
-    println!("{}", "║  ██╔═══██╗██╔══██╗██║   ██║████╗ ████║                   ║".on_black().bright_cyan().bold());
-    println!("{}", "║  ██║   ██║██║  ██║██║   ██║██╔████╔██║                   ║".on_black().bright_cyan().bold());
-    println!("{}", "║  ██║▄▄ ██║██║  ██║██║   ██║██║╚██╔╝██║                   ║".on_black().bright_cyan().bold());
-    println!("{}", "║  ╚██████╔╝██████╔╝╚██████╔╝██║ ╚═╝ ██║                   ║".on_black().bright_cyan().bold());
-    println!("{}", "║   ╚══▀▀═╝ ╚═════╝  ╚═════╝ ╚═╝     ╚═╝                   ║".on_black().bright_cyan().bold());
-    println!("{}", "║                                                           ║".on_black().bright_magenta());
-    println!("{}", "║          ⚛️  Q U A N T U M   V A U L T  ⚛️              ║".on_black().bright_magenta().bold());
+    thread::sleep(Duration::from_millis(30));
+    println!("{}", "║ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ ║".on_black().bright_magenta());
+    thread::sleep(Duration::from_millis(30));
+
+    // Matrix-style reveal of logo lines
+    let logo_lines = vec![
+        "║   ██████╗ ██████╗ ██╗   ██╗███╗   ███╗                   ║",
+        "║  ██╔═══██╗██╔══██╗██║   ██║████╗ ████║                   ║",
+        "║  ██║   ██║██║  ██║██║   ██║██╔████╔██║                   ║",
+        "║  ██║▄▄ ██║██║  ██║██║   ██║██║╚██╔╝██║                   ║",
+        "║  ╚██████╔╝██████╔╝╚██████╔╝██║ ╚═╝ ██║                   ║",
+        "║   ╚══▀▀═╝ ╚═════╝  ╚═════╝ ╚═╝     ╚═╝                   ║",
+    ];
+
+    for line in &logo_lines {
+        println!("{}", line.on_black().bright_cyan().bold());
+        thread::sleep(Duration::from_millis(40));
+    }
+
+    println!("{}", "║ ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ ║".on_black().bright_magenta());
+    thread::sleep(Duration::from_millis(30));
+
+    // Pulsing title
+    for i in 0..2 {
+        if i % 2 == 0 {
+            println!("{}", "║          ⚛️  Q U A N T U M   V A U L T  ⚛️              ║".on_black().bright_magenta().bold());
+        } else {
+            println!("{}", "║          ⚛️  Q U A N T U M   V A U L T  ⚛️              ║".on_black().bright_cyan().bold());
+        }
+        if i < 1 {
+            thread::sleep(Duration::from_millis(200));
+            print!("\x1B[1A\r");
+        }
+    }
+
     println!("{}", "║              [ SPHINCS+ POST-QUANTUM ]                    ║".on_black().bright_green());
-    println!("{}", "║                                                           ║".on_black().bright_magenta());
+    thread::sleep(Duration::from_millis(30));
+    println!("{}", "║ ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ ║".on_black().bright_magenta());
+    thread::sleep(Duration::from_millis(30));
     println!("{}", "╚═══════════════════════════════════════════════════════════╝".on_black().bright_magenta());
     println!();
-    println!("{}", "  ▓▒░ CYBERSECURITY STATUS ░▒▓".on_black().bright_cyan().bold());
+
+    // Typing effect for status
+    let status_text = "  ▓▒░ CYBERSECURITY STATUS ░▒▓";
+    print!("  ");
+    for ch in status_text.chars().skip(2) {
+        print!("{}", ch.to_string().on_black().bright_cyan().bold());
+        io::stdout().flush().unwrap();
+        thread::sleep(Duration::from_millis(15));
+    }
+    println!();
+    thread::sleep(Duration::from_millis(100));
+
+    // Animated status indicators
     println!("{} {}", "  ┃ SECURITY:".on_black().bright_magenta().bold(), "NIST FIPS 205 [ACTIVE]".on_black().bright_green());
+    thread::sleep(Duration::from_millis(50));
     println!("{} {}", "  ┃ NETWORK: ".on_black().bright_magenta().bold(), "SOLANA DEVNET".on_black().bright_cyan());
+    thread::sleep(Duration::from_millis(50));
     println!("{} {}", "  ┃ QUANTUM:".on_black().bright_magenta().bold(), "RESISTANT ✓".on_black().bright_green().bold());
+    thread::sleep(Duration::from_millis(100));
+    println!();
+}
+
+fn print_command_header(text: &str, color: &str) {
+    use std::io::{self, Write};
+    use std::thread;
+
+    println!();
+
+    // Glitch effect
+    for _ in 0..2 {
+        print!("\r{}", format!("▓▒░ {} ░▒▓", text).on_black().bright_magenta().blink());
+        io::stdout().flush().unwrap();
+        thread::sleep(Duration::from_millis(60));
+        print!("\r{}", " ".repeat(50));
+        print!("\r");
+        io::stdout().flush().unwrap();
+        thread::sleep(Duration::from_millis(30));
+    }
+
+    // Final display with color
+    let header = format!("▓▒░ {} ░▒▓", text);
+    match color {
+        "cyan" => println!("{}", header.on_black().bright_cyan().bold()),
+        "green" => println!("{}", header.on_black().bright_green().bold()),
+        "red" => println!("{}", header.on_black().bright_red().bold()),
+        "yellow" => println!("{}", header.on_black().bright_yellow().bold()),
+        _ => println!("{}", header.on_black().bright_cyan().bold()),
+    }
+
+    // Animated separator
+    let sep = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+    for chunk in sep.chars().collect::<Vec<_>>().chunks(5) {
+        print!("{}", chunk.iter().collect::<String>().on_black().bright_magenta());
+        io::stdout().flush().unwrap();
+        thread::sleep(Duration::from_millis(10));
+    }
+    println!();
     println!();
 }
 
@@ -253,17 +352,13 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Init { output_dir } => {
-            println!("{}", "▓▒░ KEY GENERATION ░▒▓".on_black().bright_cyan().bold());
-            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".on_black().bright_magenta());
-            println!();
+            print_command_header("KEY GENERATION", "cyan");
 
             cmd_init(output_dir).await?;
         }
 
         Commands::Config { keypair, show } => {
-            println!("{}", "▓▒░ CONFIGURATION ░▒▓".on_black().bright_cyan().bold());
-            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".on_black().bright_magenta());
-            println!();
+            print_command_header("CONFIGURATION", "cyan");
 
             let mut config = load_config();
 
@@ -298,9 +393,7 @@ async fn main() -> Result<()> {
             keypair,
             sphincs_pubkey,
         } => {
-            println!("{}", "▓▒░ REGISTER PQ ACCOUNT ░▒▓".on_black().bright_cyan().bold());
-            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".on_black().bright_magenta());
-            println!();
+            print_command_header("REGISTER PQ ACCOUNT", "cyan");
 
             let program_id = Pubkey::from_str(&cli.program_id)?;
 
@@ -323,9 +416,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::Lock { keypair } => {
-            println!("{}", "▓▒░ VAULT LOCKDOWN ░▒▓".on_black().bright_red().bold());
-            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".on_black().bright_magenta());
-            println!();
+            print_command_header("VAULT LOCKDOWN", "red");
 
             let program_id = Pubkey::from_str(&cli.program_id)?;
 
@@ -344,9 +435,7 @@ async fn main() -> Result<()> {
             keypair,
             sphincs_privkey,
         } => {
-            println!("{}", "▓▒░ VAULT UNLOCK ░▒▓".on_black().bright_green().bold());
-            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".on_black().bright_magenta());
-            println!();
+            print_command_header("VAULT UNLOCK", "green");
 
             let program_id = Pubkey::from_str(&cli.program_id)?;
 
@@ -369,9 +458,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::Status { keypair } => {
-            println!("{}", "▓▒░ STATUS CHECK ░▒▓".on_black().bright_cyan().bold());
-            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".on_black().bright_magenta());
-            println!();
+            print_command_header("STATUS CHECK", "cyan");
 
             let program_id = Pubkey::from_str(&cli.program_id)?;
 
@@ -387,9 +474,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::Balance { keypair, mint } => {
-            println!("{}", "▓▒░ BALANCE CHECK ░▒▓".on_black().bright_cyan().bold());
-            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".on_black().bright_magenta());
-            println!();
+            print_command_header("BALANCE CHECK", "cyan");
 
             // Auto-detect keypair and wallet
             let keypair_path = keypair.unwrap_or_else(|| get_default_keypair_path());
@@ -405,9 +490,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::Transfer { keypair, to, amount, mint } => {
-            println!("{}", "▓▒░ TOKEN TRANSFER ░▒▓".on_black().bright_yellow().bold());
-            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".on_black().bright_magenta());
-            println!();
+            print_command_header("TOKEN TRANSFER", "yellow");
 
             let program_id = Pubkey::from_str(&cli.program_id)?;
 

@@ -404,15 +404,48 @@ impl VaultClient {
         pb_phase2.finish_with_message(format!("{}", "✓ Verification complete".bright_green()));
         println!();
 
-        println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_green());
-        println!("{}", "║                                                           ║".on_black().bright_green());
-        println!("{}", "║        🔓 VAULT UNLOCKED [SUCCESS]                       ║".on_black().bright_green().bold());
-        println!("{}", "║                                                           ║".on_black().bright_green());
-        println!("{}", "╚═══════════════════════════════════════════════════════════╝".on_black().bright_green());
+        // Animated success box
+        use std::io::{self, Write};
+        use std::thread;
+
         println!();
-        println!("  {} SPHINCS+ signature verified on-chain", "✓".on_black().bright_green().bold());
-        println!("  {} Vault is now unlocked", "✓".on_black().bright_green().bold());
-        println!("  {} Tokens are accessible", "✓".on_black().bright_green().bold());
+
+        // Pulsing border effect
+        for i in 0..3 {
+            if i % 2 == 0 {
+                println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_green().bold());
+            } else {
+                println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().green());
+            }
+            if i < 2 {
+                thread::sleep(Duration::from_millis(150));
+                print!("\x1B[1A\r");
+            }
+        }
+
+        println!("{}", "║ ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ ║".on_black().bright_green());
+        thread::sleep(Duration::from_millis(50));
+        println!("{}", "║        🔓 VAULT UNLOCKED [SUCCESS]                       ║".on_black().bright_green().bold());
+        thread::sleep(Duration::from_millis(50));
+        println!("{}", "║ ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ ║".on_black().bright_green());
+        thread::sleep(Duration::from_millis(50));
+        println!("{}", "╚═══════════════════════════════════════════════════════════╝".on_black().bright_green().bold());
+        println!();
+
+        // Animated checkmarks
+        let checks = vec![
+            "  ✓ SPHINCS+ signature verified on-chain",
+            "  ✓ Vault is now unlocked",
+            "  ✓ Tokens are accessible"
+        ];
+
+        for check in &checks {
+            print!("{}", check.on_black().bright_green().bold());
+            io::stdout().flush().unwrap();
+            thread::sleep(Duration::from_millis(100));
+            println!();
+        }
+
         println!();
         println!("{} {}", "  ┃ Total transactions:".on_black().bright_magenta().bold(), "44".on_black().bright_yellow().bold());
         println!("{} {}", "  ┃ Protocol:".on_black().bright_magenta().bold(), "NIST FIPS 205".on_black().bright_cyan());
