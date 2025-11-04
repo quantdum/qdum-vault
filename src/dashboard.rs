@@ -74,6 +74,14 @@ impl Dashboard {
     }
 
     pub fn run(&mut self) -> Result<()> {
+        // Check if we're in a proper terminal
+        use crossterm::tty::IsTty;
+        if !io::stdout().is_tty() {
+            eprintln!("Error: Not running in a TTY. Dashboard requires a proper terminal.");
+            eprintln!("Try running in a native terminal (not VS Code integrated terminal).");
+            return Ok(());
+        }
+
         // Setup terminal
         enable_raw_mode()?;
         let mut stdout = io::stdout();
@@ -81,7 +89,8 @@ impl Dashboard {
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
 
-        // Initial refresh
+        // Initial refresh with a welcome message
+        self.status_message = Some("Dashboard loaded! Press any key to test...".to_string());
         self.refresh_data();
 
         // Run the app
@@ -107,11 +116,18 @@ impl Dashboard {
         loop {
             terminal.draw(|f| self.ui(f))?;
 
-            if event::poll(std::time::Duration::from_millis(100))? {
-                if let Event::Key(key) = event::read()? {
+            // Try blocking read instead of polling
+            match event::read()? {
+                Event::Key(key) => {
                     // Debug: show what key was pressed
-                    self.status_message = Some(format!("DEBUG: Key pressed - code: {:?}, modifiers: {:?}", key.code, key.modifiers));
+                    self.status_message = Some(format!("DEBUG: Key={:?} Mods={:?}", key.code, key.modifiers));
                     self.handle_key_event(key.code, key.modifiers);
+                }
+                Event::Resize(_, _) => {
+                    // Terminal was resized, just redraw
+                }
+                _ => {
+                    // Ignore mouse and other events
                 }
             }
 
