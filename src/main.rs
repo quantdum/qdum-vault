@@ -4,7 +4,7 @@ use colored::Colorize;
 use comfy_table::{Table, presets::UTF8_FULL};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
-use solana_sdk::{pubkey::Pubkey, signature::Keypair};
+use solana_sdk::{pubkey::Pubkey, signature::{Keypair, Signer}};
 use std::fs;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -124,24 +124,6 @@ enum Commands {
         mint: String,
     },
 
-    /// Mint QDUM tokens (free mint with progressive fee)
-    Mint {
-        /// Path to your Solana wallet keypair JSON file (optional, uses configured path or ~/.config/solana/id.json)
-        #[arg(long)]
-        keypair: Option<String>,
-
-        /// Amount of QDUM tokens to mint (10,000 to 50,000)
-        #[arg(long)]
-        amount: u64,
-
-        /// Mint address (defaults to QDUM devnet mint)
-        #[arg(long, default_value = "3V6ogu16de86nChsmC5wHMKJmCx5YdGXA6fbp3y3497n")]
-        mint: String,
-    },
-
-    /// Check mint status and public supply statistics
-    MintStatus,
-
     /// Transfer QDUM tokens to another wallet
     Transfer {
         /// Path to your Solana wallet keypair JSON file (optional, uses configured path or ~/.config/solana/id.json)
@@ -159,6 +141,33 @@ enum Commands {
         /// Mint address (defaults to QDUM devnet mint)
         #[arg(long, default_value = "3V6ogu16de86nChsmC5wHMKJmCx5YdGXA6fbp3y3497n")]
         mint: String,
+    },
+
+    /// Set token metadata (name, symbol, website, description)
+    SetMetadata {
+        /// Path to authority keypair (must be the program authority)
+        #[arg(long)]
+        authority: String,
+
+        /// Mint address
+        #[arg(long)]
+        mint: String,
+
+        /// Token name (max 32 chars)
+        #[arg(long)]
+        name: String,
+
+        /// Token symbol (max 10 chars)
+        #[arg(long)]
+        symbol: String,
+
+        /// Website/URI (max 200 chars)
+        #[arg(long)]
+        uri: String,
+
+        /// Description (max 100 chars)
+        #[arg(long)]
+        description: String,
     },
 }
 
@@ -420,36 +429,6 @@ async fn main() -> Result<()> {
             cmd_balance(&cli.rpc_url, wallet_pubkey, mint_pubkey).await?;
         }
 
-        Commands::Mint { keypair, amount, mint } => {
-            println!("{}", "🪙 Quantdum Vault - Mint QDUM Tokens".bold().cyan());
-            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
-            println!();
-
-            let program_id = Pubkey::from_str(&cli.program_id)?;
-
-            // Auto-detect keypair and wallet
-            let keypair_path = keypair.unwrap_or_else(|| get_default_keypair_path());
-            let (kp_path, wallet_pubkey) = load_keypair_and_extract_wallet(&keypair_path)?;
-
-            println!("{} {}", "Using keypair:".bold(), kp_path.dimmed());
-            println!("{} {}", "Wallet:       ".bold(), wallet_pubkey.to_string().yellow());
-            println!();
-
-            let mint_pubkey = Pubkey::from_str(&mint)?;
-
-            cmd_mint(&cli.rpc_url, program_id, wallet_pubkey, &kp_path, mint_pubkey, amount).await?;
-        }
-
-        Commands::MintStatus => {
-            println!("{}", "📊 Quantdum Vault - Mint Status".bold().cyan());
-            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
-            println!();
-
-            let program_id = Pubkey::from_str(&cli.program_id)?;
-
-            cmd_mint_status(&cli.rpc_url, program_id).await?;
-        }
-
         Commands::Transfer { keypair, to, amount, mint } => {
             println!("{}", "💸 Quantdum Vault - Transfer QDUM Tokens".bold().cyan());
             println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
@@ -469,6 +448,26 @@ async fn main() -> Result<()> {
             let mint_pubkey = Pubkey::from_str(&mint)?;
 
             cmd_transfer(&cli.rpc_url, program_id, wallet_pubkey, &kp_path, recipient, mint_pubkey, amount).await?;
+        }
+
+        Commands::SetMetadata { authority, mint, name, symbol, uri, description } => {
+            println!("{}", "🏷️  Quantdum Vault - Set Token Metadata".bold().cyan());
+            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
+            println!();
+
+            let program_id = Pubkey::from_str(&cli.program_id)?;
+            let mint_pubkey = Pubkey::from_str(&mint)?;
+
+            cmd_set_metadata(
+                &cli.rpc_url,
+                program_id,
+                &authority,
+                mint_pubkey,
+                name,
+                symbol,
+                uri,
+                description
+            ).await?;
         }
     }
 
@@ -656,64 +655,11 @@ async fn cmd_balance(rpc_url: &str, wallet: Pubkey, mint: Pubkey) -> Result<()> 
     Ok(())
 }
 
-async fn cmd_mint(
-    rpc_url: &str,
-    program_id: Pubkey,
-    wallet: Pubkey,
-    keypair_path: &str,
-    mint: Pubkey,
-    amount: u64,
-) -> Result<()> {
-
-    // Validate amount is in the correct range (10,000 to 50,000 QDUM in base units)
-    const MIN_MINT_AMOUNT: u64 = 10_000_000_000; // 10,000 QDUM * 10^6
-    const MAX_MINT_AMOUNT: u64 = 50_000_000_000; // 50,000 QDUM * 10^6
-
-    if amount < MIN_MINT_AMOUNT || amount > MAX_MINT_AMOUNT {
-        println!("{}", "❌ Invalid mint amount!".red().bold());
-        println!();
-        println!("Amount must be between {} and {} (in base units with 6 decimals)",
-            MIN_MINT_AMOUNT.to_string().yellow(),
-            MAX_MINT_AMOUNT.to_string().yellow());
-        println!();
-        println!("For reference:");
-        println!("  {} base units = {} QDUM", "10000000000".cyan(), "10,000".green());
-        println!("  {} base units = {} QDUM", "50000000000".cyan(), "50,000".green());
-        return Ok(());
-    }
-
-    let data = fs::read_to_string(keypair_path)
-        .context(format!("Failed to read keypair file: {}", keypair_path))?;
-    let bytes: Vec<u8> = serde_json::from_str(&data)
-        .context("Invalid keypair JSON format")?;
-    let keypair = Keypair::try_from(&bytes[..])
-        .context("Invalid keypair bytes")?;
-
-    println!("{} {}", "Amount:".bold(), format!("{} base units", amount).yellow());
-    println!("{} {}", "Mint:  ".bold(), mint.to_string().cyan());
-
-    let client = VaultClient::new(rpc_url, program_id)?;
-    client.mint_tokens(&keypair, mint, amount).await?;
-
-    // Show updated balance
-    println!("Fetching updated balance...");
-    println!();
-    client.check_balance(wallet, mint).await?;
-
-    Ok(())
-}
-
-async fn cmd_mint_status(rpc_url: &str, program_id: Pubkey) -> Result<()> {
-    let client = VaultClient::new(rpc_url, program_id)?;
-    client.get_mint_status().await?;
-
-    Ok(())
-}
 
 async fn cmd_transfer(
     rpc_url: &str,
     program_id: Pubkey,
-    from_wallet: Pubkey,
+    _from_wallet: Pubkey,
     keypair_path: &str,
     to_wallet: Pubkey,
     mint: Pubkey,
@@ -729,6 +675,39 @@ async fn cmd_transfer(
         .context("Invalid keypair bytes")?;
 
     client.transfer_tokens(&keypair, to_wallet, mint, amount).await?;
+
+    Ok(())
+}
+
+async fn cmd_set_metadata(
+    rpc_url: &str,
+    program_id: Pubkey,
+    authority_path: &str,
+    mint: Pubkey,
+    name: String,
+    symbol: String,
+    uri: String,
+    description: String,
+) -> Result<()> {
+    let client = VaultClient::new(rpc_url, program_id)?;
+
+    let data = fs::read_to_string(authority_path)
+        .context(format!("Failed to read authority keypair file: {}", authority_path))?;
+    let bytes: Vec<u8> = serde_json::from_str(&data)
+        .context("Invalid keypair JSON format")?;
+    let authority = Keypair::try_from(&bytes[..])
+        .context("Invalid keypair bytes")?;
+
+    println!("{} {}", "Authority:".bold(), authority.pubkey().to_string().yellow());
+    println!("{} {}", "Mint:     ".bold(), mint.to_string().yellow());
+    println!();
+    println!("{} {}", "Name:       ".bold(), name.bright_white());
+    println!("{} {}", "Symbol:     ".bold(), symbol.bright_white());
+    println!("{} {}", "URI:        ".bold(), uri.bright_white());
+    println!("{} {}", "Description:".bold(), description.bright_white());
+    println!();
+
+    client.set_token_metadata(&authority, mint, name, symbol, uri, description).await?;
 
     Ok(())
 }

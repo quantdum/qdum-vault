@@ -7,8 +7,19 @@ Command-line tool for managing your quantum-resistant Quantdum token vault.
 - 🔐 **SPHINCS+-SHA2-128s** post-quantum signatures (NIST FIPS 205)
 - 🔒 **Vault Locking** with cryptographic challenges
 - ✅ **11-Step Verification** for on-chain signature validation
-- 🪙 **Token Minting** with progressive fee structure
+- 💸 **Token Transfers** with Token-2022 transfer hooks
+- 🏷️ **On-Chain Metadata** management
 - 🌐 **Solana Integration** via RPC (devnet/mainnet)
+
+## Tokenomics
+
+The QDUM token has a fixed supply with no minting capabilities:
+
+- **80%** - Locked liquidity
+- **17%** - Protocol reserves
+- **3%** - Community airdrop
+
+All tokens are created at genesis. There is no minting functionality.
 
 ## Prerequisites
 
@@ -130,17 +141,32 @@ qdum-vault balance \
   --mint 3V6ogu16de86nChsmC5wHMKJmCx5YdGXA6fbp3y3497n
 ```
 
-### 7. Mint QDUM Tokens
+### 7. Transfer QDUM Tokens
 ```bash
-qdum-vault mint \
+qdum-vault transfer \
+  --to RECIPIENT_ADDRESS \
   --amount 10000000000 \
-  --keypair ~/.config/solana/id.json
+  --keypair ~/.config/solana/id.json \
+  --mint 3V6ogu16de86nChsmC5wHMKJmCx5YdGXA6fbp3y3497n
 ```
 
-Mint QDUM tokens with progressive fees:
-- Amount range: 10,000 to 50,000 QDUM (in base units with 6 decimals)
+Transfer QDUM tokens to another wallet:
+- Amount in base units with 6 decimals
 - Example: 10,000 QDUM = 10000000000 base units
-- Fees increase based on scarcity (how much has been minted)
+- Utilizes Token-2022 transfer hooks for enhanced security
+
+### 8. Set Token Metadata (Authority Only)
+```bash
+qdum-vault set-metadata \
+  --authority /path/to/authority-keypair.json \
+  --mint YOUR_MINT_ADDRESS \
+  --name "Quantdum" \
+  --symbol "QDUM" \
+  --uri "https://github.com/quantdum/qdum-vault" \
+  --description "Quantum-resistant token on Solana using SPHINCS+ post-quantum signatures"
+```
+
+Set on-chain metadata for your token (requires program authority).
 
 ## Configuration
 
