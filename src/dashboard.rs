@@ -1,30 +1,75 @@
 use anyhow::Result;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Alignment, Constraint, Direction, Layout},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
     Frame, Terminal,
 };
 use solana_sdk::pubkey::Pubkey;
 use std::io;
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum SelectedAction {
+    Register,
+    Lock,
+    Unlock,
+    Transfer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum AppMode {
+    Normal,
+    Help,
+    ActionExecuting,
+}
 
 pub struct Dashboard {
     wallet: Pubkey,
+    keypair_path: PathBuf,
+    rpc_url: String,
+    program_id: Pubkey,
     should_quit: bool,
+    selected_action: usize,
+    mode: AppMode,
+    status_message: Option<String>,
+    vault_status: Option<VaultStatus>,
+    balance: Option<u64>,
+    is_loading: bool,
+}
+
+#[derive(Clone)]
+struct VaultStatus {
+    is_locked: bool,
+    pda: Option<Pubkey>,
 }
 
 impl Dashboard {
-    pub fn new(wallet: Pubkey) -> Self {
+    pub fn new(
+        wallet: Pubkey,
+        keypair_path: PathBuf,
+        rpc_url: String,
+        program_id: Pubkey,
+    ) -> Self {
         Self {
             wallet,
+            keypair_path,
+            rpc_url,
+            program_id,
             should_quit: false,
+            selected_action: 0,
+            mode: AppMode::Normal,
+            status_message: None,
+            vault_status: None,
+            balance: None,
+            is_loading: false,
         }
     }
 
@@ -35,6 +80,9 @@ impl Dashboard {
         execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
+
+        // Initial refresh
+        self.refresh_data();
 
         // Run the app
         let res = self.run_app(&mut terminal);
@@ -48,8 +96,8 @@ impl Dashboard {
         )?;
         terminal.show_cursor()?;
 
-        if let Err(err) = res {
-            println!("{:?}", err)
+        if let Err(err) = &res {
+            println!("Error: {:?}", err);
         }
 
         Ok(())
@@ -59,14 +107,9 @@ impl Dashboard {
         loop {
             terminal.draw(|f| self.ui(f))?;
 
-            if event::poll(std::time::Duration::from_millis(250))? {
+            if event::poll(std::time::Duration::from_millis(100))? {
                 if let Event::Key(key) = event::read()? {
-                    match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => {
-                            self.should_quit = true;
-                        }
-                        _ => {}
-                    }
+                    self.handle_key_event(key.code, key.modifiers);
                 }
             }
 
@@ -74,6 +117,96 @@ impl Dashboard {
                 return Ok(());
             }
         }
+    }
+
+    fn handle_key_event(&mut self, code: KeyCode, _modifiers: KeyModifiers) {
+        match self.mode {
+            AppMode::Help => {
+                // Any key exits help mode
+                self.mode = AppMode::Normal;
+                self.status_message = None;
+            }
+            AppMode::ActionExecuting => {
+                // No input while action is executing
+            }
+            AppMode::Normal => {
+                match code {
+                    KeyCode::Char('q') | KeyCode::Esc => {
+                        self.should_quit = true;
+                    }
+                    KeyCode::Char('h') | KeyCode::F(1) => {
+                        self.mode = AppMode::Help;
+                    }
+                    KeyCode::Char('r') => {
+                        self.refresh_data();
+                    }
+                    KeyCode::Char('l') => {
+                        self.execute_lock();
+                    }
+                    KeyCode::Char('u') => {
+                        self.execute_unlock();
+                    }
+                    KeyCode::Char('g') | KeyCode::Char('1') => {
+                        self.execute_register();
+                    }
+                    KeyCode::Char('t') | KeyCode::Char('2') => {
+                        self.status_message = Some("Transfer not yet implemented in TUI. Use: qdum-vault transfer".to_string());
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        if self.selected_action > 0 {
+                            self.selected_action -= 1;
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if self.selected_action < 3 {
+                            self.selected_action += 1;
+                        }
+                    }
+                    KeyCode::Enter => {
+                        match self.selected_action {
+                            0 => self.execute_register(),
+                            1 => self.execute_lock(),
+                            2 => self.execute_unlock(),
+                            3 => self.status_message = Some("Transfer not yet implemented in TUI".to_string()),
+                            _ => {}
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn refresh_data(&mut self) {
+        self.is_loading = true;
+        self.status_message = Some("Refreshing...".to_string());
+
+        // In a real implementation, we'd fetch this asynchronously
+        // For now, set placeholder values
+        self.vault_status = Some(VaultStatus {
+            is_locked: true,
+            pda: None,
+        });
+        self.balance = Some(0);
+
+        self.is_loading = false;
+        self.status_message = Some("Data refreshed".to_string());
+    }
+
+    fn execute_register(&mut self) {
+        self.status_message = Some("Executing register... (will exit to CLI)".to_string());
+        // We'd need to exit the TUI and run the command
+        // For now, just show a message
+    }
+
+    fn execute_lock(&mut self) {
+        self.status_message = Some("Executing lock... (will exit to CLI)".to_string());
+        // Exit TUI and execute lock command
+    }
+
+    fn execute_unlock(&mut self) {
+        self.status_message = Some("Executing unlock... (will exit to CLI)".to_string());
+        // Exit TUI and execute unlock command
     }
 
     fn ui(&self, f: &mut Frame) {
@@ -85,10 +218,10 @@ impl Dashboard {
             .margin(2)
             .constraints(
                 [
-                    Constraint::Length(7),  // Header
+                    Constraint::Length(5),  // Header
                     Constraint::Length(3),  // Wallet info
                     Constraint::Min(10),    // Main content
-                    Constraint::Length(3),  // Footer
+                    Constraint::Length(4),  // Footer + status
                 ]
                 .as_ref(),
             )
@@ -102,10 +235,6 @@ impl Dashboard {
             )),
             Line::from(Span::styled(
                 "║        Q D U M   V A U L T   -   I N T E R A C T I V E   T U I    ║",
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-            )),
-            Line::from(Span::styled(
-                "╠════════════════════════════════════════════════════════════════════╣",
                 Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
             )),
             Line::from(vec![
@@ -158,61 +287,49 @@ impl Dashboard {
         // Right panel - Actions
         self.render_actions_panel(f, main_chunks[1]);
 
-        // Footer with controls
-        let footer_text = vec![Line::from(vec![
-            Span::styled(
-                " [Q/Esc] ",
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" Quit  "),
-            Span::styled(
-                " [R] ",
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" Refresh  "),
-            Span::styled(
-                " [L] ",
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" Lock  "),
-            Span::styled(
-                " [U] ",
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" Unlock  "),
-        ])];
-        let footer = Paragraph::new(footer_text)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Green))
-                    .title(" Controls ")
-                    .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            )
-            .alignment(Alignment::Center);
-        f.render_widget(footer, chunks[3]);
+        // Footer with controls and status message
+        self.render_footer(f, chunks[3]);
+
+        // Render help overlay if in help mode
+        if self.mode == AppMode::Help {
+            self.render_help_overlay(f, size);
+        }
     }
 
-    fn render_status_panel(&self, f: &mut Frame, area: ratatui::layout::Rect) {
+    fn render_status_panel(&self, f: &mut Frame, area: Rect) {
+        let status_text = if let Some(ref status) = self.vault_status {
+            if status.is_locked {
+                "🔒 LOCKED"
+            } else {
+                "🔓 UNLOCKED"
+            }
+        } else {
+            "Loading..."
+        };
+
+        let status_color = if let Some(ref status) = self.vault_status {
+            if status.is_locked {
+                Color::Red
+            } else {
+                Color::Green
+            }
+        } else {
+            Color::Yellow
+        };
+
+        let balance_text = if let Some(balance) = self.balance {
+            format!("{} QDUM", balance)
+        } else {
+            "Loading...".to_string()
+        };
+
         let items = vec![
             ListItem::new(Line::from(vec![
                 Span::styled("Status: ", Style::default().fg(Color::Gray)),
                 Span::styled(
-                    "🔒 LOCKED",
+                    status_text,
                     Style::default()
-                        .fg(Color::Red)
+                        .fg(status_color)
                         .add_modifier(Modifier::BOLD),
                 ),
             ])),
@@ -231,7 +348,7 @@ impl Dashboard {
             ])),
             ListItem::new(Line::from(vec![
                 Span::styled("Balance: ", Style::default().fg(Color::Gray)),
-                Span::styled("Loading...", Style::default().fg(Color::Yellow)),
+                Span::styled(balance_text, Style::default().fg(Color::Yellow)),
             ])),
         ];
 
@@ -246,41 +363,192 @@ impl Dashboard {
         f.render_widget(list, area);
     }
 
-    fn render_actions_panel(&self, f: &mut Frame, area: ratatui::layout::Rect) {
-        let items = vec![
-            ListItem::new(Line::from(vec![
-                Span::styled("→ ", Style::default().fg(Color::Green)),
-                Span::styled("Register", Style::default().fg(Color::White)),
-                Span::styled(" - Register PQ account", Style::default().fg(Color::Gray)),
-            ])),
-            ListItem::new(Line::from("")),
-            ListItem::new(Line::from(vec![
-                Span::styled("→ ", Style::default().fg(Color::Red)),
-                Span::styled("Lock", Style::default().fg(Color::White)),
-                Span::styled(" - Lock your vault", Style::default().fg(Color::Gray)),
-            ])),
-            ListItem::new(Line::from("")),
-            ListItem::new(Line::from(vec![
-                Span::styled("→ ", Style::default().fg(Color::Yellow)),
-                Span::styled("Unlock", Style::default().fg(Color::White)),
-                Span::styled(" - Unlock with quantum sig", Style::default().fg(Color::Gray)),
-            ])),
-            ListItem::new(Line::from("")),
-            ListItem::new(Line::from(vec![
-                Span::styled("→ ", Style::default().fg(Color::Cyan)),
-                Span::styled("Transfer", Style::default().fg(Color::White)),
-                Span::styled(" - Send QDUM tokens", Style::default().fg(Color::Gray)),
-            ])),
+    fn render_actions_panel(&self, f: &mut Frame, area: Rect) {
+        let actions = vec![
+            ("Register", "G/1", "Register PQ account", Color::Green),
+            ("Lock", "L", "Lock your vault", Color::Red),
+            ("Unlock", "U", "Unlock with quantum sig", Color::Yellow),
+            ("Transfer", "T/2", "Send QDUM tokens", Color::Cyan),
         ];
+
+        let items: Vec<ListItem> = actions
+            .iter()
+            .enumerate()
+            .map(|(idx, (name, key, desc, color))| {
+                let arrow = if idx == self.selected_action { "▶ " } else { "  " };
+                let style = if idx == self.selected_action {
+                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+
+                ListItem::new(Line::from(vec![
+                    Span::styled(arrow, Style::default().fg(*color)),
+                    Span::styled(*name, style),
+                    Span::styled(format!(" [{}]", key), Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!(" - {}", desc), Style::default().fg(Color::Gray)),
+                ]))
+            })
+            .collect();
 
         let list = List::new(items).block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Green))
-                .title(" Available Actions ")
+                .title(" Available Actions (↑↓ to select, Enter to execute) ")
                 .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         );
 
         f.render_widget(list, area);
     }
+
+    fn render_footer(&self, f: &mut Frame, area: Rect) {
+        let footer_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(2), Constraint::Length(2)].as_ref())
+            .split(area);
+
+        // Controls
+        let footer_text = vec![Line::from(vec![
+            Span::styled(
+                " [Q/Esc] ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" Quit  "),
+            Span::styled(
+                " [H/?] ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" Help  "),
+            Span::styled(
+                " [R] ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" Refresh  "),
+            Span::styled(
+                " [↑↓/jk] ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Blue)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" Navigate  "),
+            Span::styled(
+                " [Enter] ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" Execute"),
+        ])];
+        let footer = Paragraph::new(footer_text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Green))
+                    .title(" Controls ")
+                    .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            )
+            .alignment(Alignment::Center);
+        f.render_widget(footer, footer_chunks[0]);
+
+        // Status message
+        if let Some(ref msg) = self.status_message {
+            let status_widget = Paragraph::new(msg.clone())
+                .style(Style::default().fg(Color::Yellow))
+                .alignment(Alignment::Center)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(Color::Yellow))
+                        .title(" Status ")
+                );
+            f.render_widget(status_widget, footer_chunks[1]);
+        }
+    }
+
+    fn render_help_overlay(&self, f: &mut Frame, area: Rect) {
+        let help_text = vec![
+            Line::from(Span::styled(
+                "QDUM VAULT - HELP",
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Navigation:", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from("  ↑/↓ or j/k  - Navigate actions"),
+            Line::from("  Enter       - Execute selected action"),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Actions:", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from("  G or 1      - Register PQ account"),
+            Line::from("  L           - Lock vault"),
+            Line::from("  U           - Unlock vault"),
+            Line::from("  T or 2      - Transfer tokens"),
+            Line::from("  R           - Refresh status"),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Other:", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from("  H or ?      - Show this help"),
+            Line::from("  Q or Esc    - Quit dashboard"),
+            Line::from(""),
+            Line::from(Span::styled(
+                "Press any key to close help",
+                Style::default().fg(Color::Yellow),
+            )),
+        ];
+
+        // Center the help box
+        let help_area = centered_rect(60, 60, area);
+
+        // Clear the background
+        f.render_widget(Clear, help_area);
+
+        let help_paragraph = Paragraph::new(help_text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+                    .title(" Help ")
+                    .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            )
+            .alignment(Alignment::Left)
+            .wrap(Wrap { trim: true });
+
+        f.render_widget(help_paragraph, help_area);
+    }
+}
+
+// Helper function to create a centered rect
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }

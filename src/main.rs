@@ -56,7 +56,7 @@ struct Cli {
     program_id: String,
 
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -325,11 +325,14 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Print banner for all commands except dashboard (which takes over the screen)
-    if !matches!(cli.command, Commands::Dashboard { .. }) {
+    // If no command provided, default to dashboard
+    let command = cli.command.unwrap_or(Commands::Dashboard { keypair: None });
+
+    if !matches!(command, Commands::Dashboard { .. }) {
         print_banner();
     }
 
-    match cli.command {
+    match command {
         Commands::Init { output_dir } => {
             print_command_header("Initialize Quantum Keypair", "[INIT]".bright_green());
 
@@ -490,11 +493,20 @@ async fn main() -> Result<()> {
         Commands::Dashboard { keypair } => {
             // Don't print banner for dashboard - it takes over the screen
 
+            let program_id = Pubkey::from_str(&cli.program_id)?;
+
             // Auto-detect keypair and wallet
             let keypair_path = keypair.unwrap_or_else(|| get_default_keypair_path());
-            let (_kp_path, wallet_pubkey) = load_keypair_and_extract_wallet(&keypair_path)?;
+            let (kp_path, wallet_pubkey) = load_keypair_and_extract_wallet(&keypair_path)?;
 
-            let mut dashboard = Dashboard::new(wallet_pubkey);
+            let kp_pathbuf = PathBuf::from(kp_path);
+
+            let mut dashboard = Dashboard::new(
+                wallet_pubkey,
+                kp_pathbuf,
+                cli.rpc_url.clone(),
+                program_id,
+            );
             dashboard.run()?;
         }
 
