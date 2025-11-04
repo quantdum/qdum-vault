@@ -876,29 +876,68 @@ impl VaultClient {
             &[] // No public key set yet
         };
 
-        println!("{}", "📊 Vault Status".bold().cyan());
-        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        println!();
-        if sphincs_pubkey.len() > 0 {
-            println!("SPHINCS+ Public Key: {}", hex::encode(sphincs_pubkey).cyan());
+        // Create status table
+        use comfy_table::{Table, presets::UTF8_FULL, Cell};
+
+        let mut status_table = Table::new();
+        status_table.load_preset(UTF8_FULL);
+        status_table.set_header(vec![
+            "Property".bright_white().bold().to_string(),
+            "Value".bright_white().bold().to_string()
+        ]);
+
+        // Add rows with proper formatting
+        status_table.add_row(vec![
+            "Wallet".dimmed().to_string(),
+            wallet.to_string().bright_cyan().to_string()
+        ]);
+
+        status_table.add_row(vec![
+            "PQ Account (PDA)".dimmed().to_string(),
+            pq_account.to_string().bright_cyan().to_string()
+        ]);
+
+        let pubkey_display = if sphincs_pubkey.len() > 0 {
+            hex::encode(sphincs_pubkey)[..16].to_string() + "..." + &hex::encode(sphincs_pubkey)[sphincs_pubkey.len()*2-16..]
         } else {
-            println!("SPHINCS+ Public Key: {} (not set - use write_public_key instruction)", "None".yellow());
-        }
-        println!("Algorithm: SPHINCS+-SHA2-128s ({})", algorithm);
+            "Not set".yellow().to_string()
+        };
+        status_table.add_row(vec![
+            "SPHINCS+ Public Key".dimmed().to_string(),
+            pubkey_display
+        ]);
+
+        status_table.add_row(vec![
+            "Algorithm".dimmed().to_string(),
+            format!("SPHINCS+-SHA2-128s ({})", algorithm).bright_green().to_string()
+        ]);
+
+        let status_display = if is_locked == 1 {
+            "🔒 LOCKED".red().bold().to_string()
+        } else {
+            "🔓 UNLOCKED".green().bold().to_string()
+        };
+        status_table.add_row(vec![
+            "Vault Status".dimmed().to_string(),
+            status_display
+        ]);
+
+        println!("{}", status_table);
         println!();
 
         if is_locked == 1 {
-            println!("Status: {}", "🔒 LOCKED".red().bold());
+            println!("{}", "⚠️  Vault is Locked".yellow().bold());
             println!();
-            println!("Your tokens cannot be transferred while locked.");
-            println!("To unlock, run: qdum-vault unlock --wallet {} --keypair <path>", wallet);
+            println!("  {} Your tokens cannot be transferred while locked.", "•".bright_yellow());
+            println!("  {} Run {} to unlock", "•".bright_yellow(), "qdum-vault unlock".bright_green());
             println!();
-            println!("Current Unlock Challenge:");
-            println!("   {}", hex::encode(unlock_challenge).cyan());
+            println!("{}", "Unlock Challenge:".dimmed());
+            println!("  {}", hex::encode(unlock_challenge).bright_cyan());
         } else {
-            println!("Status: {}", "🔓 UNLOCKED".green().bold());
+            println!("{}", "✓ Vault is Unlocked".green().bold());
             println!();
-            println!("Your tokens can be transferred freely.");
+            println!("  {} Your tokens can be transferred freely", "•".bright_green());
+            println!("  {} Run {} to lock the vault", "•".bright_green(), "qdum-vault lock".bright_yellow());
         }
 
         println!();

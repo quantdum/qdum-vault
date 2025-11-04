@@ -157,47 +157,92 @@ fn get_styles() -> clap::builder::Styles {
 }
 
 fn print_banner() {
+    use std::io::{self, Write};
+    use std::thread;
+
     println!();
 
-    // Clean, professional banner inspired by GitHub CLI and Stripe CLI
-    let title = format!("{}  {}",
-        "QDUM".bright_green().bold(),
-        "Quantum Vault".bright_white());
-    let subtitle = "Post-Quantum Security for Solana".dimmed();
+    // Animated startup sequence
+    print!("{}", "  [".dimmed());
+    for _ in 0..3 {
+        print!("{}", "█".bright_green());
+        io::stdout().flush().unwrap();
+        thread::sleep(Duration::from_millis(50));
+    }
+    println!("{} {}", "]".dimmed(), "Initializing...".dimmed());
+    thread::sleep(Duration::from_millis(100));
 
-    println!("{}", "  ╔════════════════════════════════════════════════════╗".bright_green());
-    println!("{}", "  ║                                                    ║".bright_green());
-    println!("  ║   {}                             ║", title);
-    println!("  ║   {}                  ║", subtitle);
-    println!("{}", "  ║                                                    ║".bright_green());
-    println!("{}", "  ╚════════════════════════════════════════════════════╝".bright_green());
     println!();
 
-    // Quick info table
-    let mut info_table = Table::new();
-    info_table.load_preset(comfy_table::presets::NOTHING);
-    info_table
+    // ASCII Art Logo - QDUM style
+    println!("{}", "  ╔══════════════════════════════════════════════════════════════════╗".bright_green().bold());
+    println!("{}", "  ║                                                                  ║".bright_green());
+    println!("{}", "  ║     ██████╗ ██████╗ ██╗   ██╗███╗   ███╗                        ║".bright_green().bold());
+    println!("{}", "  ║    ██╔═══██╗██╔══██╗██║   ██║████╗ ████║                        ║".bright_green().bold());
+    println!("{}", "  ║    ██║   ██║██║  ██║██║   ██║██╔████╔██║                        ║".bright_green().bold());
+    println!("{}", "  ║    ██║▄▄ ██║██║  ██║██║   ██║██║╚██╔╝██║                        ║".bright_green().bold());
+    println!("{}", "  ║    ╚██████╔╝██████╔╝╚██████╔╝██║ ╚═╝ ██║                        ║".bright_green().bold());
+    println!("{}", "  ║     ╚══▀▀═╝ ╚═════╝  ╚═════╝ ╚═╝     ╚═╝                        ║".bright_green().bold());
+    println!("{}", "  ║                                                                  ║".bright_green());
+    println!("  ║                {}                       ║", "Q U A N T U M   V A U L T".bright_white().bold());
+    println!("  ║           {}           ║", "Post-Quantum Security for Solana".bright_cyan());
+    println!("{}", "  ║                                                                  ║".bright_green());
+    println!("{}", "  ╠══════════════════════════════════════════════════════════════════╣".bright_green().bold());
+    println!("{}", "  ║                                                                  ║".bright_green());
+
+    // Quick stats with icons
+    println!("  ║  {}  {}                   ║", "🔐".to_string(), format!("{:<56}", "SPHINCS+ (NIST FIPS 205) - Quantum Resistant".bright_white()));
+    println!("  ║  {}  {}                   ║", "🌐".to_string(), format!("{:<56}", "Solana Devnet - On-Chain Verification".bright_white()));
+    println!("  ║  {}  {}                   ║", "📦".to_string(), format!("{:<56}", format!("Version {} - Production Ready", env!("CARGO_PKG_VERSION")).bright_white()));
+
+    println!("{}", "  ║                                                                  ║".bright_green());
+    println!("{}", "  ╚══════════════════════════════════════════════════════════════════╝".bright_green().bold());
+    println!();
+
+    // Quick start guide
+    let mut guide_table = Table::new();
+    guide_table.load_preset(comfy_table::presets::UTF8_FULL);
+    guide_table.set_header(vec![
+        "Step".bright_white().bold().to_string(),
+        "Command".bright_cyan().to_string(),
+        "Description".dimmed().to_string()
+    ]);
+
+    guide_table
         .add_row(vec![
-            "  Security".dimmed().to_string(),
-            "SPHINCS+ (NIST FIPS 205)".bright_green().to_string()
+            "1".bright_yellow().to_string(),
+            "qdum-vault init".bright_green().to_string(),
+            "Generate quantum keypairs".to_string()
         ])
         .add_row(vec![
-            "  Network".dimmed().to_string(),
-            "Solana Devnet".bright_cyan().to_string()
+            "2".bright_yellow().to_string(),
+            "qdum-vault register".bright_green().to_string(),
+            "Register on-chain".to_string()
         ])
         .add_row(vec![
-            "  Version".dimmed().to_string(),
-            env!("CARGO_PKG_VERSION").bright_yellow().to_string()
+            "3".bright_yellow().to_string(),
+            "qdum-vault lock".bright_green().to_string(),
+            "Lock your vault".to_string()
+        ])
+        .add_row(vec![
+            "4".bright_yellow().to_string(),
+            "qdum-vault unlock".bright_green().to_string(),
+            "Unlock with quantum sig".to_string()
         ]);
 
-    println!("{}", info_table);
+    println!("{}", guide_table);
+    println!();
+    println!("  {} Type {} for all available commands",
+        "💡".to_string(),
+        "qdum-vault --help".bright_cyan().bold());
     println!();
 }
 
 fn print_command_header(text: &str, icon: colored::ColoredString) {
     println!();
-    println!("{} {}", icon, text.bright_white().bold());
-    println!("{}", "─".repeat(60).dimmed());
+    println!("{}", "╔".bright_green().to_string() + &"═".repeat(68).bright_green().to_string() + &"╗".bright_green().to_string());
+    println!("║  {} {}  ║", icon, format!("{:<60}", text).bright_white().bold());
+    println!("{}", "╚".bright_green().to_string() + &"═".repeat(68).bright_green().to_string() + &"╝".bright_green().to_string());
     println!();
 }
 
