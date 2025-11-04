@@ -24,7 +24,7 @@ struct VaultConfig {
 #[derive(Parser)]
 #[command(name = "qdum-vault")]
 #[command(author, version)]
-#[command(about = "⚛️  Quantum-Resistant Vault CLI")]
+#[command(about = "Quantum-Resistant Vault CLI")]
 #[command(long_about = None)]
 #[command(after_help = format!("\n{}\n\n{}\n  {} {}\n  {} {}\n  {} {}\n  {} {}\n\n{}\n  {}\n\n{}\n  {} {}\n  {} {}\n  {} {}\n\n{}\n  {}\n  {}\n",
     "╔═══════════════════════════════════════════════════════════╗".bright_cyan(),
@@ -162,12 +162,12 @@ fn print_banner() {
 
     println!();
 
-    // Glitch effect intro
+    // Green initialization effect
     for _ in 0..3 {
-        print!("\r{}", "█░▒▓▒░█ INITIALIZING ░█░▒▓▒░█".on_black().bright_magenta().blink());
+        print!("\r{}", "▓▒░ INITIALIZING ░▒▓".on_black().bright_green().blink());
         io::stdout().flush().unwrap();
         thread::sleep(Duration::from_millis(80));
-        print!("\r{}", "▓░▒█░▒▓ INITIALIZING ▓░▒█░▒▓".on_black().bright_cyan().blink());
+        print!("\r{}", "░▒▓ INITIALIZING ▓▒░".on_black().green().blink());
         io::stdout().flush().unwrap();
         thread::sleep(Duration::from_millis(80));
     }
@@ -175,16 +175,16 @@ fn print_banner() {
     print!("\r");
     io::stdout().flush().unwrap();
 
-    // Dollar bill style border with ornate guilloche patterns
+    // Top border
     println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_green());
     thread::sleep(Duration::from_millis(30));
 
-    // Top ornamental border - dollar bill guilloche style
+    // Top ornamental border - animated guilloche pattern
     for frame in 0..3 {
         let ornament = match frame {
-            0 => "║◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆║",
-            1 => "║◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇║",
-            _ => "║◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆║",
+            0 => "║◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇║",
+            1 => "║◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆║",
+            _ => "║◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇║",
         };
         if frame > 0 {
             print!("\x1B[1A\r");
@@ -194,24 +194,41 @@ fn print_banner() {
         thread::sleep(Duration::from_millis(100));
     }
 
-    // Matrix-style reveal of logo lines
+    // Currency-style filigree pattern (animated)
+    for frame in 0..3 {
+        let filigree = match frame {
+            0 => "║▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░║",
+            1 => "║░░▒▒▓▓░░▒▒▓▓░░▒▒▓▓░░▒▒▓▓░░▒▒▓▓░░▒▒▓▓░░▒▒▓▓░░▒▒▓▓░░▒▒▓▓░░▒▒▓▓║",
+            _ => "║▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓║",
+        };
+        if frame > 0 {
+            print!("\x1B[1A\r");
+        }
+        println!("{}", filigree.on_black().green());
+        io::stdout().flush().unwrap();
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    println!("{}", "║                                                           ║".on_black().bright_green());
+
+    // Logo lines
     let logo_lines = vec![
-        "║                                                           ║",
         "║   ██████╗ ██████╗ ██╗   ██╗███╗   ███╗                   ║",
         "║  ██╔═══██╗██╔══██╗██║   ██║████╗ ████║                   ║",
         "║  ██║   ██║██║  ██║██║   ██║██╔████╔██║                   ║",
         "║  ██║▄▄ ██║██║  ██║██║   ██║██║╚██╔╝██║                   ║",
         "║  ╚██████╔╝██████╔╝╚██████╔╝██║ ╚═╝ ██║                   ║",
         "║   ╚══▀▀═╝ ╚═════╝  ╚═════╝ ╚═╝     ╚═╝                   ║",
-        "║                                                           ║",
     ];
 
     for line in &logo_lines {
-        println!("{}", line.on_black().bright_cyan().bold());
+        println!("{}", line.on_black().bright_green().bold());
         thread::sleep(Duration::from_millis(40));
     }
 
-    // Middle ornamental border
+    println!("{}", "║                                                           ║".on_black().bright_green());
+
+    // Middle ornamental border - wave pattern
     for frame in 0..3 {
         let ornament = match frame {
             0 => "║═══════════════════════════════════════════════════════════║",
@@ -226,12 +243,12 @@ fn print_banner() {
         thread::sleep(Duration::from_millis(100));
     }
 
-    // Pulsing title with dollar bill gold/green colors
+    // Pulsing title - all green
     for i in 0..3 {
         if i % 2 == 0 {
-            println!("{}", "║          ⚛️  Q U A N T U M   V A U L T  ⚛️              ║".on_black().bright_yellow().bold());
+            println!("{}", "║             Q U A N T U M   V A U L T                     ║".on_black().bright_green().bold());
         } else {
-            println!("{}", "║          ⚛️  Q U A N T U M   V A U L T  ⚛️              ║".on_black().bright_green().bold());
+            println!("{}", "║             Q U A N T U M   V A U L T                     ║".on_black().green().bold());
         }
         if i < 2 {
             thread::sleep(Duration::from_millis(180));
@@ -240,16 +257,31 @@ fn print_banner() {
     }
 
     println!("{}", "║                                                           ║".on_black().bright_green());
-    println!("{}", "║              [ SPHINCS+ POST-QUANTUM ]                    ║".on_black().bright_white());
+    println!("{}", "║              [ SPHINCS+ POST-QUANTUM ]                    ║".on_black().bright_green());
     println!("{}", "║                                                           ║".on_black().bright_green());
     thread::sleep(Duration::from_millis(30));
 
-    // Bottom ornamental border - dollar bill style rosette pattern
+    // Currency-style interlocking circles pattern (animated)
+    for frame in 0..3 {
+        let pattern = match frame {
+            0 => "║◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎║",
+            1 => "║◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉║",
+            _ => "║◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎║",
+        };
+        if frame > 0 {
+            print!("\x1B[1A\r");
+        }
+        println!("{}", pattern.on_black().bright_green());
+        io::stdout().flush().unwrap();
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    // Bottom ornamental border - rosette pattern
     for frame in 0..3 {
         let ornament = match frame {
-            0 => "║◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈║",
-            1 => "║◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉║",
-            _ => "║◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈║",
+            0 => "║◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉║",
+            1 => "║◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈║",
+            _ => "║◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉║",
         };
         if frame > 0 {
             print!("\x1B[1A\r");
@@ -259,61 +291,59 @@ fn print_banner() {
         thread::sleep(Duration::from_millis(100));
     }
 
+    // Lathe work pattern (animated)
+    for frame in 0..3 {
+        let lathe = match frame {
+            0 => "║░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░║",
+            1 => "║▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒║",
+            _ => "║▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓║",
+        };
+        if frame > 0 {
+            print!("\x1B[1A\r");
+        }
+        println!("{}", lathe.on_black().green());
+        io::stdout().flush().unwrap();
+        thread::sleep(Duration::from_millis(100));
+    }
+
     println!("{}", "╚═══════════════════════════════════════════════════════════╝".on_black().bright_green());
     println!();
 
-    // Typing effect for status
-    let status_text = "  ▓▒░ CYBERSECURITY STATUS ░▒▓";
+    // Status display - all green
+    let status_text = "  SECURE VAULT STATUS";
     print!("  ");
     for ch in status_text.chars().skip(2) {
-        print!("{}", ch.to_string().on_black().bright_cyan().bold());
+        print!("{}", ch.to_string().on_black().bright_green().bold());
         io::stdout().flush().unwrap();
         thread::sleep(Duration::from_millis(15));
     }
     println!();
     thread::sleep(Duration::from_millis(100));
 
-    // Animated status indicators
-    println!("{} {}", "  ┃ SECURITY:".on_black().bright_magenta().bold(), "NIST FIPS 205 [ACTIVE]".on_black().bright_green());
+    // Status indicators - all green
+    println!("{} {}", "  | SECURITY:".on_black().bright_green().bold(), "NIST FIPS 205 [ACTIVE]".on_black().green());
     thread::sleep(Duration::from_millis(50));
-    println!("{} {}", "  ┃ NETWORK: ".on_black().bright_magenta().bold(), "SOLANA DEVNET".on_black().bright_cyan());
+    println!("{} {}", "  | NETWORK: ".on_black().bright_green().bold(), "SOLANA DEVNET".on_black().green());
     thread::sleep(Duration::from_millis(50));
-    println!("{} {}", "  ┃ QUANTUM:".on_black().bright_magenta().bold(), "RESISTANT ✓".on_black().bright_green().bold());
+    println!("{} {}", "  | QUANTUM: ".on_black().bright_green().bold(), "RESISTANT [OK]".on_black().bright_green().bold());
     thread::sleep(Duration::from_millis(100));
     println!();
 }
 
-fn print_command_header(text: &str, color: &str) {
+fn print_command_header(text: &str, _color: &str) {
     use std::io::{self, Write};
     use std::thread;
 
     println!();
 
-    // Glitch effect
-    for _ in 0..2 {
-        print!("\r{}", format!("▓▒░ {} ░▒▓", text).on_black().bright_magenta().blink());
-        io::stdout().flush().unwrap();
-        thread::sleep(Duration::from_millis(60));
-        print!("\r{}", " ".repeat(50));
-        print!("\r");
-        io::stdout().flush().unwrap();
-        thread::sleep(Duration::from_millis(30));
-    }
-
-    // Final display with color
+    // All green command header
     let header = format!("▓▒░ {} ░▒▓", text);
-    match color {
-        "cyan" => println!("{}", header.on_black().bright_cyan().bold()),
-        "green" => println!("{}", header.on_black().bright_green().bold()),
-        "red" => println!("{}", header.on_black().bright_red().bold()),
-        "yellow" => println!("{}", header.on_black().bright_yellow().bold()),
-        _ => println!("{}", header.on_black().bright_cyan().bold()),
-    }
+    println!("{}", header.on_black().bright_green().bold());
 
-    // Animated separator
+    // Animated separator - all green
     let sep = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
     for chunk in sep.chars().collect::<Vec<_>>().chunks(5) {
-        print!("{}", chunk.iter().collect::<String>().on_black().bright_magenta());
+        print!("{}", chunk.iter().collect::<String>().on_black().green());
         io::stdout().flush().unwrap();
         thread::sleep(Duration::from_millis(10));
     }
@@ -415,7 +445,7 @@ async fn main() -> Result<()> {
                 config.keypair_path = Some(kp_path.clone());
                 save_config(&config)?;
 
-                println!("{} Default keypair path set to:", "✓".green().bold());
+                println!("{} Default keypair path set to:", "[OK]".green().bold());
                 println!("  {}", kp_path.yellow());
                 println!();
                 println!("Saved to: {}", get_config_path().display().to_string().dimmed());
@@ -560,11 +590,11 @@ async fn cmd_init(output_dir: Option<String>) -> Result<()> {
     use std::io::{self, Write};
     use solana_sdk::signature::{Keypair, Signer};
 
-    println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_magenta());
-    println!("{}", "║                                                           ║".on_black().bright_magenta());
-    println!("{}", "║    ⚛️  INITIALIZING QUANTUM KEYPAIR GENERATION ⚛️        ║".on_black().bright_cyan().bold());
-    println!("{}", "║                                                           ║".on_black().bright_magenta());
-    println!("{}", "╚═══════════════════════════════════════════════════════════╝".on_black().bright_magenta());
+    println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_green());
+    println!("{}", "║                                                           ║".on_black().bright_green());
+    println!("{}", "║       INITIALIZING QUANTUM KEYPAIR GENERATION             ║".on_black().bright_green().bold());
+    println!("{}", "║                                                           ║".on_black().bright_green());
+    println!("{}", "╚═══════════════════════════════════════════════════════════╝".on_black().bright_green());
     println!();
 
     // Spinner for SPHINCS+ key generation
@@ -576,24 +606,24 @@ async fn cmd_init(output_dir: Option<String>) -> Result<()> {
             .unwrap()
     );
     spinner.enable_steady_tick(Duration::from_millis(80));
-    spinner.set_message("⚛️  Generating SPHINCS+ quantum-resistant keypair...".to_string());
+    spinner.set_message("Generating SPHINCS+ quantum-resistant keypair...".to_string());
 
     // Generate SPHINCS+ keys
     let key_manager = SphincsKeyManager::new(output_dir.clone())?;
     key_manager.generate_and_save_keypair()?;
 
-    spinner.finish_with_message(format!("{}", "✓ SPHINCS+ keypair generated".bright_green()));
+    spinner.finish_with_message(format!("{}", "[OK] SPHINCS+ keypair generated".bright_green()));
 
     // Spinner for Solana keypair
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
         ProgressStyle::default_spinner()
             .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
-            .template("{spinner:.cyan} {msg}")
+            .template("{spinner:.green} {msg}")
             .unwrap()
     );
     spinner.enable_steady_tick(Duration::from_millis(80));
-    spinner.set_message("🔑 Generating Solana wallet keypair...".to_string());
+    spinner.set_message("Generating Solana wallet keypair...".to_string());
 
     // Generate Solana keypair
     let solana_keypair = Keypair::new();
@@ -612,7 +642,7 @@ async fn cmd_init(output_dir: Option<String>) -> Result<()> {
     let keypair_json = serde_json::to_string(&keypair_bytes.to_vec())?;
     fs::write(&keypair_path, keypair_json)?;
 
-    spinner.finish_with_message(format!("{}", "✓ Solana keypair created".bright_green()));
+    spinner.finish_with_message(format!("{}", "[OK] Solana keypair created".bright_green()));
 
     // Summary table
     println!();
@@ -647,7 +677,7 @@ async fn cmd_init(output_dir: Option<String>) -> Result<()> {
 
     // Ask if they want to set it as default
     println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_green());
-    println!("{}", "║          ✓ INITIALIZATION COMPLETE [SUCCESS]             ║".on_black().bright_green().bold());
+    println!("{}", "║            INITIALIZATION COMPLETE [SUCCESS]              ║".on_black().bright_green().bold());
     println!("{}", "╚═══════════════════════════════════════════════════════════╝".on_black().bright_green());
     println!();
 
@@ -664,8 +694,8 @@ async fn cmd_init(output_dir: Option<String>) -> Result<()> {
         save_config(&config)?;
 
         println!();
-        println!("{} {}", "✓".bright_green().bold(), "Default keypair configured!".bright_white().bold());
-        println!("  All commands will now use: {}", keypair_path.display().to_string().bright_magenta());
+        println!("{} {}", "[OK]".bright_green().bold(), "Default keypair configured!".bright_white().bold());
+        println!("  All commands will now use: {}", keypair_path.display().to_string().bright_green());
     } else {
         println!();
         println!("  You can set it later with:");
