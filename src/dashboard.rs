@@ -257,8 +257,8 @@ impl Dashboard {
                 [
                     Constraint::Length(5),  // Header
                     Constraint::Length(3),  // Wallet info
-                    Constraint::Min(10),    // Main content
-                    Constraint::Length(4),  // Footer + status
+                    Constraint::Min(8),     // Main content
+                    Constraint::Length(6),  // Footer + status (3 lines each = 6 total)
                 ]
                 .as_ref(),
             )
@@ -443,7 +443,7 @@ impl Dashboard {
         // Always split footer into controls + status
         let footer_chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(2), Constraint::Length(2)].as_ref())
+            .constraints([Constraint::Length(3), Constraint::Length(3)].as_ref())
             .split(area);
 
         // Controls
