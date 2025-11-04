@@ -179,7 +179,7 @@ impl Dashboard {
 
     fn refresh_data(&mut self) {
         self.is_loading = true;
-        self.status_message = Some("Refreshing...".to_string());
+        self.status_message = Some("🔄 Refreshing data...".to_string());
 
         // In a real implementation, we'd fetch this asynchronously
         // For now, set placeholder values
@@ -190,23 +190,19 @@ impl Dashboard {
         self.balance = Some(0);
 
         self.is_loading = false;
-        self.status_message = Some("Data refreshed".to_string());
+        self.status_message = Some("✓ Data refreshed successfully".to_string());
     }
 
     fn execute_register(&mut self) {
-        self.status_message = Some("Executing register... (will exit to CLI)".to_string());
-        // We'd need to exit the TUI and run the command
-        // For now, just show a message
+        self.status_message = Some("⚙️  REGISTER action pressed - This will call qdum-vault register (not yet implemented)".to_string());
     }
 
     fn execute_lock(&mut self) {
-        self.status_message = Some("Executing lock... (will exit to CLI)".to_string());
-        // Exit TUI and execute lock command
+        self.status_message = Some("🔒 LOCK action pressed - This will call qdum-vault lock (not yet implemented)".to_string());
     }
 
     fn execute_unlock(&mut self) {
-        self.status_message = Some("Executing unlock... (will exit to CLI)".to_string());
-        // Exit TUI and execute unlock command
+        self.status_message = Some("🔓 UNLOCK action pressed - This will call qdum-vault unlock (not yet implemented)".to_string());
     }
 
     fn ui(&self, f: &mut Frame) {
@@ -403,18 +399,11 @@ impl Dashboard {
     }
 
     fn render_footer(&self, f: &mut Frame, area: Rect) {
-        // Split footer area based on whether we have a status message
-        let footer_chunks = if self.status_message.is_some() {
-            Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Length(2), Constraint::Length(2)].as_ref())
-                .split(area)
-        } else {
-            Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Min(2)].as_ref())
-                .split(area)
-        };
+        // Always split footer into controls + status
+        let footer_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(2), Constraint::Length(2)].as_ref())
+            .split(area);
 
         // Controls
         let footer_text = vec![Line::from(vec![
@@ -470,19 +459,22 @@ impl Dashboard {
             .alignment(Alignment::Center);
         f.render_widget(footer, footer_chunks[0]);
 
-        // Status message
-        if let Some(ref msg) = self.status_message {
-            let status_widget = Paragraph::new(msg.clone())
-                .style(Style::default().fg(Color::Yellow))
-                .alignment(Alignment::Center)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(Color::Yellow))
-                        .title(" Status ")
-                );
-            f.render_widget(status_widget, footer_chunks[1]);
-        }
+        // Status message - always show
+        let status_msg = self.status_message.as_ref()
+            .map(|s| s.clone())
+            .unwrap_or_else(|| "Ready - Press H or ? for help, Q to quit".to_string());
+
+        let status_widget = Paragraph::new(status_msg)
+            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+            .alignment(Alignment::Center)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Cyan))
+                    .title(" Status ")
+            );
+
+        f.render_widget(status_widget, footer_chunks[1]);
     }
 
     fn render_help_overlay(&self, f: &mut Frame, area: Rect) {
