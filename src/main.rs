@@ -149,31 +149,33 @@ fn get_styles() -> clap::builder::Styles {
     clap::builder::Styles::styled()
         .header(AnsiColor::BrightMagenta.on_default().bold())
         .usage(AnsiColor::BrightCyan.on_default().bold())
-        .literal(AnsiColor::BrightWhite.on_default())
-        .placeholder(AnsiColor::BrightBlue.on_default())
+        .literal(AnsiColor::BrightGreen.on_default())
+        .placeholder(AnsiColor::Magenta.on_default())
         .error(AnsiColor::BrightRed.on_default().bold())
-        .valid(AnsiColor::BrightGreen.on_default())
+        .valid(AnsiColor::BrightCyan.on_default())
         .invalid(AnsiColor::BrightYellow.on_default())
 }
 
 fn print_banner() {
     println!();
-    println!("{}", "╔═══════════════════════════════════════════════════════════╗".bright_cyan());
-    println!("{}", "║                                                           ║".bright_cyan());
-    println!("{}", "║  ██████╗ ██████╗ ██╗   ██╗███╗   ███╗                    ║".bright_cyan().bold());
-    println!("{}", "║ ██╔═══██╗██╔══██╗██║   ██║████╗ ████║                    ║".bright_cyan().bold());
-    println!("{}", "║ ██║   ██║██║  ██║██║   ██║██╔████╔██║                    ║".bright_cyan().bold());
-    println!("{}", "║ ██║▄▄ ██║██║  ██║██║   ██║██║╚██╔╝██║                    ║".bright_cyan().bold());
-    println!("{}", "║ ╚██████╔╝██████╔╝╚██████╔╝██║ ╚═╝ ██║                    ║".bright_cyan().bold());
-    println!("{}", "║  ╚══▀▀═╝ ╚═════╝  ╚═════╝ ╚═╝     ╚═╝                    ║".bright_cyan().bold());
-    println!("{}", "║                                                           ║".bright_cyan());
-    println!("{}", "║            ⚛️  QUANTUM-RESISTANT VAULT  ⚛️               ║".bright_magenta().bold());
-    println!("{}", "║               SPHINCS+ SHA2-128s                          ║".bright_cyan());
-    println!("{}", "║                                                           ║".bright_cyan());
-    println!("{}", "╚═══════════════════════════════════════════════════════════╝".bright_cyan());
+    println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_magenta());
+    println!("{}", "║                                                           ║".on_black().bright_magenta());
+    println!("{}", "║   ██████╗ ██████╗ ██╗   ██╗███╗   ███╗                   ║".on_black().bright_cyan().bold());
+    println!("{}", "║  ██╔═══██╗██╔══██╗██║   ██║████╗ ████║                   ║".on_black().bright_cyan().bold());
+    println!("{}", "║  ██║   ██║██║  ██║██║   ██║██╔████╔██║                   ║".on_black().bright_cyan().bold());
+    println!("{}", "║  ██║▄▄ ██║██║  ██║██║   ██║██║╚██╔╝██║                   ║".on_black().bright_cyan().bold());
+    println!("{}", "║  ╚██████╔╝██████╔╝╚██████╔╝██║ ╚═╝ ██║                   ║".on_black().bright_cyan().bold());
+    println!("{}", "║   ╚══▀▀═╝ ╚═════╝  ╚═════╝ ╚═╝     ╚═╝                   ║".on_black().bright_cyan().bold());
+    println!("{}", "║                                                           ║".on_black().bright_magenta());
+    println!("{}", "║          ⚛️  Q U A N T U M   V A U L T  ⚛️              ║".on_black().bright_magenta().bold());
+    println!("{}", "║              [ SPHINCS+ POST-QUANTUM ]                    ║".on_black().bright_green());
+    println!("{}", "║                                                           ║".on_black().bright_magenta());
+    println!("{}", "╚═══════════════════════════════════════════════════════════╝".on_black().bright_magenta());
     println!();
-    println!("{} {}", "  Security:".bright_blue().bold(), "NIST FIPS 205 Post-Quantum".bright_white());
-    println!("{} {}", "  Network: ".bright_blue().bold(), "Solana Devnet".bright_white());
+    println!("{}", "  ▓▒░ CYBERSECURITY STATUS ░▒▓".on_black().bright_cyan().bold());
+    println!("{} {}", "  ┃ SECURITY:".on_black().bright_magenta().bold(), "NIST FIPS 205 [ACTIVE]".on_black().bright_green());
+    println!("{} {}", "  ┃ NETWORK: ".on_black().bright_magenta().bold(), "SOLANA DEVNET".on_black().bright_cyan());
+    println!("{} {}", "  ┃ QUANTUM:".on_black().bright_magenta().bold(), "RESISTANT ✓".on_black().bright_green().bold());
     println!();
 }
 
@@ -251,16 +253,16 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Init { output_dir } => {
-            println!("{}", "🔐 Quantdum Vault - Key Generation".bold().cyan());
-            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
+            println!("{}", "▓▒░ KEY GENERATION ░▒▓".on_black().bright_cyan().bold());
+            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".on_black().bright_magenta());
             println!();
 
             cmd_init(output_dir).await?;
         }
 
         Commands::Config { keypair, show } => {
-            println!("{}", "⚙️  Quantdum Vault - Configuration".bold().cyan());
-            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
+            println!("{}", "▓▒░ CONFIGURATION ░▒▓".on_black().bright_cyan().bold());
+            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".on_black().bright_magenta());
             println!();
 
             let mut config = load_config();
@@ -296,8 +298,8 @@ async fn main() -> Result<()> {
             keypair,
             sphincs_pubkey,
         } => {
-            println!("{}", "📝 Quantdum Vault - Register PQ Account".bold().cyan());
-            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
+            println!("{}", "▓▒░ REGISTER PQ ACCOUNT ░▒▓".on_black().bright_cyan().bold());
+            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".on_black().bright_magenta());
             println!();
 
             let program_id = Pubkey::from_str(&cli.program_id)?;
@@ -321,8 +323,8 @@ async fn main() -> Result<()> {
         }
 
         Commands::Lock { keypair } => {
-            println!("{}", "🔒 Quantdum Vault - Lock Vault".bold().cyan());
-            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
+            println!("{}", "▓▒░ VAULT LOCKDOWN ░▒▓".on_black().bright_red().bold());
+            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".on_black().bright_magenta());
             println!();
 
             let program_id = Pubkey::from_str(&cli.program_id)?;
@@ -342,8 +344,8 @@ async fn main() -> Result<()> {
             keypair,
             sphincs_privkey,
         } => {
-            println!("{}", "🔓 Quantdum Vault - Unlock Vault".bold().cyan());
-            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
+            println!("{}", "▓▒░ VAULT UNLOCK ░▒▓".on_black().bright_green().bold());
+            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".on_black().bright_magenta());
             println!();
 
             let program_id = Pubkey::from_str(&cli.program_id)?;
@@ -367,8 +369,8 @@ async fn main() -> Result<()> {
         }
 
         Commands::Status { keypair } => {
-            println!("{}", "📊 Quantdum Vault - Status Check".bold().cyan());
-            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
+            println!("{}", "▓▒░ STATUS CHECK ░▒▓".on_black().bright_cyan().bold());
+            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".on_black().bright_magenta());
             println!();
 
             let program_id = Pubkey::from_str(&cli.program_id)?;
@@ -385,8 +387,8 @@ async fn main() -> Result<()> {
         }
 
         Commands::Balance { keypair, mint } => {
-            println!("{}", "💰 Quantdum Vault - Balance Check".bold().cyan());
-            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
+            println!("{}", "▓▒░ BALANCE CHECK ░▒▓".on_black().bright_cyan().bold());
+            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".on_black().bright_magenta());
             println!();
 
             // Auto-detect keypair and wallet
@@ -403,8 +405,8 @@ async fn main() -> Result<()> {
         }
 
         Commands::Transfer { keypair, to, amount, mint } => {
-            println!("{}", "💸 Quantdum Vault - Transfer QDUM Tokens".bold().cyan());
-            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
+            println!("{}", "▓▒░ TOKEN TRANSFER ░▒▓".on_black().bright_yellow().bold());
+            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".on_black().bright_magenta());
             println!();
 
             let program_id = Pubkey::from_str(&cli.program_id)?;
@@ -432,11 +434,11 @@ async fn cmd_init(output_dir: Option<String>) -> Result<()> {
     use std::io::{self, Write};
     use solana_sdk::signature::{Keypair, Signer};
 
-    println!("{}", "╔═══════════════════════════════════════════════════════════╗".bright_cyan());
-    println!("{}", "║                                                           ║".bright_cyan());
-    println!("{}", "║      ⚛️  INITIALIZING QUANTUM KEYPAIR GENERATION ⚛️      ║".bright_magenta().bold());
-    println!("{}", "║                                                           ║".bright_cyan());
-    println!("{}", "╚═══════════════════════════════════════════════════════════╝".bright_cyan());
+    println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_magenta());
+    println!("{}", "║                                                           ║".on_black().bright_magenta());
+    println!("{}", "║    ⚛️  INITIALIZING QUANTUM KEYPAIR GENERATION ⚛️        ║".on_black().bright_cyan().bold());
+    println!("{}", "║                                                           ║".on_black().bright_magenta());
+    println!("{}", "╚═══════════════════════════════════════════════════════════╝".on_black().bright_magenta());
     println!();
 
     // Spinner for SPHINCS+ key generation
@@ -518,9 +520,9 @@ async fn cmd_init(output_dir: Option<String>) -> Result<()> {
     println!();
 
     // Ask if they want to set it as default
-    println!("{}", "╔═══════════════════════════════════════════════════════════╗".bright_green());
-    println!("{}", "║            ✓ INITIALIZATION COMPLETE                     ║".bright_green().bold());
-    println!("{}", "╚═══════════════════════════════════════════════════════════╝".bright_green());
+    println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_green());
+    println!("{}", "║          ✓ INITIALIZATION COMPLETE [SUCCESS]             ║".on_black().bright_green().bold());
+    println!("{}", "╚═══════════════════════════════════════════════════════════╝".on_black().bright_green());
     println!();
 
     print!("{} ", "Set this as your default keypair? (y/n):".bright_yellow().bold());

@@ -226,11 +226,11 @@ impl VaultClient {
         keypair_path: &str,
         sphincs_privkey: &[u8; 64],
     ) -> Result<()> {
-        println!("{}", "╔═══════════════════════════════════════════════════════════╗".bright_cyan());
-        println!("{}", "║                                                           ║".bright_cyan());
-        println!("{}", "║    ⚛️  QUANTUM VAULT UNLOCK SEQUENCE INITIATED  ⚛️       ║".bright_magenta().bold());
-        println!("{}", "║                                                           ║".bright_cyan());
-        println!("{}", "╚═══════════════════════════════════════════════════════════╝".bright_cyan());
+        println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_magenta());
+        println!("{}", "║                                                           ║".on_black().bright_magenta());
+        println!("{}", "║   ⚛️  QUANTUM VAULT UNLOCK SEQUENCE INITIATED  ⚛️        ║".on_black().bright_cyan().bold());
+        println!("{}", "║                                                           ║".on_black().bright_magenta());
+        println!("{}", "╚═══════════════════════════════════════════════════════════╝".on_black().bright_magenta());
         println!();
 
         println!("{} {}", "Wallet:".bright_blue().bold(), wallet.to_string().bright_white());
@@ -404,18 +404,18 @@ impl VaultClient {
         pb_phase2.finish_with_message(format!("{}", "✓ Verification complete".bright_green()));
         println!();
 
-        println!("{}", "═".repeat(61).bright_green());
+        println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_green());
+        println!("{}", "║                                                           ║".on_black().bright_green());
+        println!("{}", "║        🔓 VAULT UNLOCKED [SUCCESS]                       ║".on_black().bright_green().bold());
+        println!("{}", "║                                                           ║".on_black().bright_green());
+        println!("{}", "╚═══════════════════════════════════════════════════════════╝".on_black().bright_green());
         println!();
-        println!("  {}", "🔓 VAULT UNLOCKED SUCCESSFULLY".bright_green().bold());
+        println!("  {} SPHINCS+ signature verified on-chain", "✓".on_black().bright_green().bold());
+        println!("  {} Vault is now unlocked", "✓".on_black().bright_green().bold());
+        println!("  {} Tokens are accessible", "✓".on_black().bright_green().bold());
         println!();
-        println!("{}", "═".repeat(61).bright_green());
-        println!();
-        println!("  {} SPHINCS+ signature verified on-chain", "✓".bright_green());
-        println!("  {} Vault is now unlocked", "✓".bright_green());
-        println!("  {} Tokens are accessible", "✓".bright_green());
-        println!();
-        println!("{} {}", "Total transactions:".bright_blue().bold(), "44".bright_yellow().bold());
-        println!("{} {}", "Protocol:".bright_blue().bold(), "NIST FIPS 205".bright_cyan());
+        println!("{} {}", "  ┃ Total transactions:".on_black().bright_magenta().bold(), "44".on_black().bright_yellow().bold());
+        println!("{} {}", "  ┃ Protocol:".on_black().bright_magenta().bold(), "NIST FIPS 205".on_black().bright_cyan());
         println!();
 
         Ok(())
@@ -1122,13 +1122,13 @@ impl VaultClient {
         println!();
 
         println!();
-        println!("{}", "╔═══════════════════════════════════════════════════════════╗".bright_green());
-        println!("{}", "║            ✅ TRANSFER SUCCESSFUL                         ║".bright_green().bold());
-        println!("{}", "╚═══════════════════════════════════════════════════════════╝".bright_green());
+        println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_green());
+        println!("{}", "║          ✅ TRANSFER COMPLETE [SUCCESS]                  ║".on_black().bright_green().bold());
+        println!("{}", "╚═══════════════════════════════════════════════════════════╝".on_black().bright_green());
         println!();
-        println!("{} {}", "   Amount:     ".bold(), format!("{} QDUM", amount as f64 / 1_000_000.0).bright_green());
-        println!("{} {}", "   Recipient:  ".bold(), recipient.to_string().bright_cyan());
-        println!("{} {}", "   Transaction:".bold(), signature.to_string().cyan());
+        println!("{} {}", "  ┃ Amount:     ".on_black().bright_magenta().bold(), format!("{} QDUM", amount as f64 / 1_000_000.0).on_black().bright_green());
+        println!("{} {}", "  ┃ Recipient:  ".on_black().bright_magenta().bold(), recipient.to_string().on_black().bright_cyan());
+        println!("{} {}", "  ┃ Transaction:".on_black().bright_magenta().bold(), signature.to_string().on_black().cyan());
         println!();
         println!("{}", format!("   View on Solscan: https://solscan.io/tx/{}?cluster=devnet", signature).dimmed());
         println!();
