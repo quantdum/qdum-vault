@@ -131,33 +131,33 @@ impl Dashboard {
             }
             AppMode::Normal => {
                 match code {
-                    KeyCode::Char('q') | KeyCode::Esc => {
+                    KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
                         self.should_quit = true;
                     }
-                    KeyCode::Char('h') | KeyCode::F(1) => {
+                    KeyCode::Char('h') | KeyCode::Char('H') | KeyCode::Char('?') | KeyCode::F(1) => {
                         self.mode = AppMode::Help;
                     }
-                    KeyCode::Char('r') => {
+                    KeyCode::Char('r') | KeyCode::Char('R') => {
                         self.refresh_data();
                     }
-                    KeyCode::Char('l') => {
+                    KeyCode::Char('l') | KeyCode::Char('L') => {
                         self.execute_lock();
                     }
-                    KeyCode::Char('u') => {
+                    KeyCode::Char('u') | KeyCode::Char('U') => {
                         self.execute_unlock();
                     }
-                    KeyCode::Char('g') | KeyCode::Char('1') => {
+                    KeyCode::Char('g') | KeyCode::Char('G') | KeyCode::Char('1') => {
                         self.execute_register();
                     }
-                    KeyCode::Char('t') | KeyCode::Char('2') => {
+                    KeyCode::Char('t') | KeyCode::Char('T') | KeyCode::Char('2') => {
                         self.status_message = Some("Transfer not yet implemented in TUI. Use: qdum-vault transfer".to_string());
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
+                    KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('K') => {
                         if self.selected_action > 0 {
                             self.selected_action -= 1;
                         }
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
+                    KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J') => {
                         if self.selected_action < 3 {
                             self.selected_action += 1;
                         }
@@ -403,10 +403,18 @@ impl Dashboard {
     }
 
     fn render_footer(&self, f: &mut Frame, area: Rect) {
-        let footer_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(2), Constraint::Length(2)].as_ref())
-            .split(area);
+        // Split footer area based on whether we have a status message
+        let footer_chunks = if self.status_message.is_some() {
+            Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(2), Constraint::Length(2)].as_ref())
+                .split(area)
+        } else {
+            Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(2)].as_ref())
+                .split(area)
+        };
 
         // Controls
         let footer_text = vec![Line::from(vec![
