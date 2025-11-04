@@ -1,6 +1,6 @@
 use anyhow::Result;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -116,12 +116,16 @@ impl Dashboard {
         loop {
             terminal.draw(|f| self.ui(f))?;
 
-            // Try blocking read instead of polling
+            // Read events - IMPORTANT: Only handle KeyPress, not KeyRelease
             match event::read()? {
                 Event::Key(key) => {
-                    // Debug: show what key was pressed
-                    self.status_message = Some(format!("DEBUG: Key={:?} Mods={:?}", key.code, key.modifiers));
-                    self.handle_key_event(key.code, key.modifiers);
+                    // CRITICAL: On Windows/WSL, we get both Press and Release events
+                    // We only want to handle Press events to avoid double-triggering
+                    if key.kind == KeyEventKind::Press {
+                        // Debug: show what key was pressed
+                        self.status_message = Some(format!("DEBUG: Key={:?} Mods={:?}", key.code, key.modifiers));
+                        self.handle_key_event(key.code, key.modifiers);
+                    }
                 }
                 Event::Resize(_, _) => {
                     // Terminal was resized, just redraw
