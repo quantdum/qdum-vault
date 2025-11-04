@@ -109,6 +109,8 @@ impl Dashboard {
 
             if event::poll(std::time::Duration::from_millis(100))? {
                 if let Event::Key(key) = event::read()? {
+                    // Debug: show what key was pressed
+                    self.status_message = Some(format!("DEBUG: Key pressed - code: {:?}, modifiers: {:?}", key.code, key.modifiers));
                     self.handle_key_event(key.code, key.modifiers);
                 }
             }
