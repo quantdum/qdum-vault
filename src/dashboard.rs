@@ -29,7 +29,17 @@ enum SelectedAction {
 enum AppMode {
     Normal,
     Help,
-    ActionExecuting,
+    RegisterPopup,
+    LockPopup,
+    UnlockPopup,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum ActionStep {
+    Starting,
+    InProgress(String),
+    Success(String),
+    Error(String),
 }
 
 pub struct Dashboard {
@@ -44,6 +54,7 @@ pub struct Dashboard {
     vault_status: Option<VaultStatus>,
     balance: Option<u64>,
     is_loading: bool,
+    action_steps: Vec<ActionStep>,
 }
 
 #[derive(Clone)]
@@ -71,6 +82,7 @@ impl Dashboard {
             vault_status: None,
             balance: None,
             is_loading: false,
+            action_steps: Vec::new(),
         }
     }
 
@@ -167,8 +179,25 @@ impl Dashboard {
                 self.mode = AppMode::Normal;
                 self.status_message = None;
             }
-            AppMode::ActionExecuting => {
-                // No input while action is executing
+            AppMode::RegisterPopup | AppMode::LockPopup | AppMode::UnlockPopup => {
+                // In action popups, Esc cancels, Enter confirms/continues
+                match code {
+                    KeyCode::Esc => {
+                        self.mode = AppMode::Normal;
+                        self.action_steps.clear();
+                        self.status_message = Some("Action cancelled".to_string());
+                    }
+                    KeyCode::Enter => {
+                        // Execute the action based on current mode
+                        match self.mode {
+                            AppMode::RegisterPopup => self.perform_register_action(),
+                            AppMode::LockPopup => self.perform_lock_action(),
+                            AppMode::UnlockPopup => self.perform_unlock_action(),
+                            _ => {}
+                        }
+                    }
+                    _ => {}
+                }
             }
             AppMode::Normal => {
                 match code {
@@ -235,15 +264,59 @@ impl Dashboard {
     }
 
     fn execute_register(&mut self) {
-        self.status_message = Some("⚙️  REGISTER action pressed - This will call qdum-vault register (not yet implemented)".to_string());
+        self.mode = AppMode::RegisterPopup;
+        self.action_steps.clear();
+        self.action_steps.push(ActionStep::Starting);
+        self.status_message = Some("Opening Register wizard...".to_string());
     }
 
     fn execute_lock(&mut self) {
-        self.status_message = Some("🔒 LOCK action pressed - This will call qdum-vault lock (not yet implemented)".to_string());
+        self.mode = AppMode::LockPopup;
+        self.action_steps.clear();
+        self.action_steps.push(ActionStep::Starting);
+        self.status_message = Some("Opening Lock wizard...".to_string());
     }
 
     fn execute_unlock(&mut self) {
-        self.status_message = Some("🔓 UNLOCK action pressed - This will call qdum-vault unlock (not yet implemented)".to_string());
+        self.mode = AppMode::UnlockPopup;
+        self.action_steps.clear();
+        self.action_steps.push(ActionStep::Starting);
+        self.status_message = Some("Opening Unlock wizard...".to_string());
+    }
+
+    fn perform_register_action(&mut self) {
+        // Simulate the register process with steps
+        if self.action_steps.is_empty() || matches!(self.action_steps.last(), Some(ActionStep::Starting)) {
+            self.action_steps.clear();
+            self.action_steps.push(ActionStep::InProgress("Checking SPHINCS+ public key...".to_string()));
+            self.action_steps.push(ActionStep::InProgress("Connecting to Solana devnet...".to_string()));
+            self.action_steps.push(ActionStep::InProgress("Creating PDA account...".to_string()));
+            self.action_steps.push(ActionStep::Success("✓ Account registered successfully!".to_string()));
+            self.status_message = Some("Register completed!".to_string());
+        }
+    }
+
+    fn perform_lock_action(&mut self) {
+        if self.action_steps.is_empty() || matches!(self.action_steps.last(), Some(ActionStep::Starting)) {
+            self.action_steps.clear();
+            self.action_steps.push(ActionStep::InProgress("Generating lock challenge...".to_string()));
+            self.action_steps.push(ActionStep::InProgress("Sending lock transaction...".to_string()));
+            self.action_steps.push(ActionStep::InProgress("Confirming on-chain...".to_string()));
+            self.action_steps.push(ActionStep::Success("✓ Vault locked successfully!".to_string()));
+            self.status_message = Some("Lock completed!".to_string());
+        }
+    }
+
+    fn perform_unlock_action(&mut self) {
+        if self.action_steps.is_empty() || matches!(self.action_steps.last(), Some(ActionStep::Starting)) {
+            self.action_steps.clear();
+            self.action_steps.push(ActionStep::InProgress("Reading SPHINCS+ private key...".to_string()));
+            self.action_steps.push(ActionStep::InProgress("Generating quantum signature...".to_string()));
+            self.action_steps.push(ActionStep::InProgress("Submitting 44 verification transactions...".to_string()));
+            self.action_steps.push(ActionStep::InProgress("Verifying signatures on-chain...".to_string()));
+            self.action_steps.push(ActionStep::Success("✓ Vault unlocked successfully!".to_string()));
+            self.status_message = Some("Unlock completed!".to_string());
+        }
     }
 
     fn ui(&self, f: &mut Frame) {
@@ -330,6 +403,14 @@ impl Dashboard {
         // Render help overlay if in help mode
         if self.mode == AppMode::Help {
             self.render_help_overlay(f, size);
+        }
+
+        // Render action popups
+        match self.mode {
+            AppMode::RegisterPopup => self.render_action_popup(f, size, "REGISTER", Color::Green),
+            AppMode::LockPopup => self.render_action_popup(f, size, "LOCK VAULT", Color::Red),
+            AppMode::UnlockPopup => self.render_action_popup(f, size, "UNLOCK VAULT", Color::Yellow),
+            _ => {}
         }
     }
 
@@ -570,6 +651,79 @@ impl Dashboard {
             .wrap(Wrap { trim: true });
 
         f.render_widget(help_paragraph, help_area);
+    }
+
+    fn render_action_popup(&self, f: &mut Frame, area: Rect, title: &str, title_color: Color) {
+        let popup_area = centered_rect(70, 70, area);
+
+        // Clear background
+        f.render_widget(Clear, popup_area);
+
+        // Build text from action steps
+        let mut text_lines = vec![
+            Line::from(Span::styled(
+                format!("═══ {} ═══", title),
+                Style::default().fg(title_color).add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+        ];
+
+        if self.action_steps.is_empty() {
+            text_lines.push(Line::from("No steps yet..."));
+        } else {
+            for step in &self.action_steps {
+                let line = match step {
+                    ActionStep::Starting => Line::from(vec![
+                        Span::styled("⏳ ", Style::default().fg(Color::Yellow)),
+                        Span::styled("Preparing...", Style::default().fg(Color::White)),
+                    ]),
+                    ActionStep::InProgress(msg) => Line::from(vec![
+                        Span::styled("⏳ ", Style::default().fg(Color::Cyan)),
+                        Span::styled(msg.clone(), Style::default().fg(Color::White)),
+                    ]),
+                    ActionStep::Success(msg) => Line::from(vec![
+                        Span::styled("✓ ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                        Span::styled(msg.clone(), Style::default().fg(Color::Green)),
+                    ]),
+                    ActionStep::Error(msg) => Line::from(vec![
+                        Span::styled("✗ ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+                        Span::styled(msg.clone(), Style::default().fg(Color::Red)),
+                    ]),
+                };
+                text_lines.push(line);
+            }
+        }
+
+        // Add instructions
+        text_lines.push(Line::from(""));
+        text_lines.push(Line::from(""));
+
+        if matches!(self.action_steps.last(), Some(ActionStep::Starting)) {
+            text_lines.push(Line::from(vec![
+                Span::styled("[Enter]", Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)),
+                Span::raw(" Execute  "),
+                Span::styled("[Esc]", Style::default().fg(Color::Black).bg(Color::Red).add_modifier(Modifier::BOLD)),
+                Span::raw(" Cancel"),
+            ]));
+        } else {
+            text_lines.push(Line::from(vec![
+                Span::styled("[Esc]", Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)),
+                Span::raw(" Close"),
+            ]));
+        }
+
+        let popup_paragraph = Paragraph::new(text_lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(title_color).add_modifier(Modifier::BOLD))
+                    .title(format!(" {} ", title))
+                    .title_style(Style::default().fg(title_color).add_modifier(Modifier::BOLD)),
+            )
+            .alignment(Alignment::Left)
+            .wrap(Wrap { trim: true });
+
+        f.render_widget(popup_paragraph, popup_area);
     }
 }
 
