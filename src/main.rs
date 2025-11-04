@@ -12,9 +12,11 @@ use std::time::Duration;
 
 mod crypto;
 mod solana;
+mod dashboard;
 
 use crypto::sphincs::SphincsKeyManager;
 use solana::client::VaultClient;
+use dashboard::Dashboard;
 
 #[derive(Serialize, Deserialize, Default)]
 struct VaultConfig {
@@ -141,6 +143,13 @@ enum Commands {
         /// Mint address (defaults to QDUM devnet mint)
         #[arg(long, default_value = "3V6ogu16de86nChsmC5wHMKJmCx5YdGXA6fbp3y3497n")]
         mint: String,
+    },
+
+    /// Launch interactive dashboard (TUI)
+    Dashboard {
+        /// Path to your Solana wallet keypair JSON file (optional, uses configured path or ~/.config/solana/id.json)
+        #[arg(long)]
+        keypair: Option<String>,
     },
 }
 
@@ -315,8 +324,10 @@ fn load_keypair_and_extract_wallet(keypair_path: &str) -> Result<(String, Pubkey
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Print banner for all commands except help
-    print_banner();
+    // Print banner for all commands except dashboard (which takes over the screen)
+    if !matches!(cli.command, Commands::Dashboard { .. }) {
+        print_banner();
+    }
 
     match cli.command {
         Commands::Init { output_dir } => {
@@ -476,6 +487,17 @@ async fn main() -> Result<()> {
             cmd_transfer(&cli.rpc_url, program_id, wallet_pubkey, &kp_path, recipient, mint_pubkey, amount).await?;
         }
 
+        Commands::Dashboard { keypair } => {
+            // Don't print banner for dashboard - it takes over the screen
+
+            // Auto-detect keypair and wallet
+            let keypair_path = keypair.unwrap_or_else(|| get_default_keypair_path());
+            let (_kp_path, wallet_pubkey) = load_keypair_and_extract_wallet(&keypair_path)?;
+
+            let mut dashboard = Dashboard::new(wallet_pubkey);
+            dashboard.run()?;
+        }
+
     }
 
     Ok(())
@@ -559,27 +581,32 @@ async fn cmd_init(output_dir: Option<String>) -> Result<()> {
     println!("{} {}", "Wallet:".dimmed(), wallet_address.to_string().bright_green().bold());
     println!();
 
-    // Ask if they want to set it as default
-    print!("{} ", "Set as default keypair?".bright_white().bold());
-    print!("{} ", "(y/n)".dimmed());
-    io::stdout().flush()?;
+    // Ask if they want to set it as default using inquire
+    use inquire::Confirm;
 
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    let answer = input.trim().to_lowercase();
+    let set_default = Confirm::new("Set this as your default keypair?")
+        .with_default(true)
+        .with_help_message("All commands will use this keypair automatically")
+        .prompt();
 
-    if answer == "y" || answer == "yes" {
-        let mut config = load_config();
-        config.keypair_path = Some(keypair_path.to_str().unwrap().to_string());
-        save_config(&config)?;
+    match set_default {
+        Ok(true) => {
+            let mut config = load_config();
+            config.keypair_path = Some(keypair_path.to_str().unwrap().to_string());
+            save_config(&config)?;
 
-        println!();
-        println!("{} Default keypair configured", "[✓]".bright_green().bold());
-        println!("{} {}", "  Path:".dimmed(), keypair_path.display().to_string().bright_cyan());
-    } else {
-        println!();
-        println!("{} Skipped. Configure later with:", "[i]".bright_yellow());
-        println!("  {}", format!("qdum-vault config --keypair {}", keypair_path.display()).dimmed());
+            println!();
+            println!("{} Default keypair configured", "[✓]".bright_green().bold());
+            println!("{} {}", "  Path:".dimmed(), keypair_path.display().to_string().bright_cyan());
+        }
+        Ok(false) => {
+            println!();
+            println!("{} Skipped. Configure later with:", "[i]".bright_yellow());
+            println!("  {}", format!("qdum-vault config --keypair {}", keypair_path.display()).dimmed());
+        }
+        Err(_) => {
+            println!("{} Prompt cancelled", "[!]".yellow());
+        }
     }
 
     println!();
