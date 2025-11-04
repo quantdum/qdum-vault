@@ -13,8 +13,9 @@ use ratatui::{
     Frame, Terminal,
 };
 use solana_sdk::pubkey::Pubkey;
-use std::io;
+use std::io::{self, Write as _};
 use std::path::PathBuf;
+use std::fs::OpenOptions;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum SelectedAction {
@@ -74,14 +75,6 @@ impl Dashboard {
     }
 
     pub fn run(&mut self) -> Result<()> {
-        // Check if we're in a proper terminal
-        use crossterm::tty::IsTty;
-        if !io::stdout().is_tty() {
-            eprintln!("Error: Not running in a TTY. Dashboard requires a proper terminal.");
-            eprintln!("Try running in a native terminal (not VS Code integrated terminal).");
-            return Ok(());
-        }
-
         // Setup terminal
         enable_raw_mode()?;
         let mut stdout = io::stdout();
@@ -113,29 +106,55 @@ impl Dashboard {
     }
 
     fn run_app(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
+        // Open debug log file
+        let mut log = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/qdum-debug.log")
+            .ok();
+
+        if let Some(ref mut f) = log {
+            let _ = writeln!(f, "\n=== Dashboard started ===");
+        }
+
         loop {
             terminal.draw(|f| self.ui(f))?;
 
             // Read events - IMPORTANT: Only handle KeyPress, not KeyRelease
             match event::read()? {
                 Event::Key(key) => {
+                    if let Some(ref mut f) = log {
+                        let _ = writeln!(f, "Event::Key received - kind={:?} code={:?} mods={:?}",
+                            key.kind, key.code, key.modifiers);
+                    }
+
                     // CRITICAL: On Windows/WSL, we get both Press and Release events
                     // We only want to handle Press events to avoid double-triggering
                     if key.kind == KeyEventKind::Press {
+                        if let Some(ref mut f) = log {
+                            let _ = writeln!(f, "  -> Processing KeyPress: {:?}", key.code);
+                        }
                         // Debug: show what key was pressed
                         self.status_message = Some(format!("DEBUG: Key={:?} Mods={:?}", key.code, key.modifiers));
                         self.handle_key_event(key.code, key.modifiers);
                     }
                 }
-                Event::Resize(_, _) => {
-                    // Terminal was resized, just redraw
+                Event::Resize(w, h) => {
+                    if let Some(ref mut f) = log {
+                        let _ = writeln!(f, "Event::Resize {}x{}", w, h);
+                    }
                 }
-                _ => {
-                    // Ignore mouse and other events
+                other => {
+                    if let Some(ref mut f) = log {
+                        let _ = writeln!(f, "Event::Other {:?}", other);
+                    }
                 }
             }
 
             if self.should_quit {
+                if let Some(ref mut f) = log {
+                    let _ = writeln!(f, "=== Dashboard quit ===");
+                }
                 return Ok(());
             }
         }
