@@ -16,6 +16,10 @@ use solana_sdk::pubkey::Pubkey;
 use std::io::{self, Write as _};
 use std::path::PathBuf;
 use std::fs::OpenOptions;
+use tokio::runtime::Runtime;
+
+use crate::crypto::sphincs::SphincsKeyManager;
+use crate::solana::client::VaultClient;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum SelectedAction {
@@ -55,6 +59,8 @@ pub struct Dashboard {
     balance: Option<u64>,
     is_loading: bool,
     action_steps: Vec<ActionStep>,
+    runtime: Runtime,
+    vault_client: VaultClient,
 }
 
 #[derive(Clone)]
@@ -69,8 +75,11 @@ impl Dashboard {
         keypair_path: PathBuf,
         rpc_url: String,
         program_id: Pubkey,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        let runtime = Runtime::new()?;
+        let vault_client = VaultClient::new(&rpc_url, program_id)?;
+
+        Ok(Self {
             wallet,
             keypair_path,
             rpc_url,
@@ -83,7 +92,9 @@ impl Dashboard {
             balance: None,
             is_loading: false,
             action_steps: Vec::new(),
-        }
+            runtime,
+            vault_client,
+        })
     }
 
     pub fn run(&mut self) -> Result<()> {
@@ -285,37 +296,139 @@ impl Dashboard {
     }
 
     fn perform_register_action(&mut self) {
-        // Simulate the register process with steps
-        if self.action_steps.is_empty() || matches!(self.action_steps.last(), Some(ActionStep::Starting)) {
-            self.action_steps.clear();
-            self.action_steps.push(ActionStep::InProgress("Checking SPHINCS+ public key...".to_string()));
-            self.action_steps.push(ActionStep::InProgress("Connecting to Solana devnet...".to_string()));
-            self.action_steps.push(ActionStep::InProgress("Creating PDA account...".to_string()));
-            self.action_steps.push(ActionStep::Success("✓ Account registered successfully!".to_string()));
-            self.status_message = Some("Register completed!".to_string());
+        if !self.action_steps.is_empty() && !matches!(self.action_steps.last(), Some(ActionStep::Starting)) {
+            return; // Already executed
+        }
+
+        self.action_steps.clear();
+        self.action_steps.push(ActionStep::InProgress("Loading SPHINCS+ public key...".to_string()));
+
+        // Load SPHINCS+ public key
+        let key_manager = match SphincsKeyManager::new(None) {
+            Ok(km) => km,
+            Err(e) => {
+                self.action_steps.push(ActionStep::Error(format!("Failed to initialize key manager: {}", e)));
+                self.status_message = Some("Register failed!".to_string());
+                return;
+            }
+        };
+
+        let sphincs_pubkey = match key_manager.load_public_key(None) {
+            Ok(pk) => pk,
+            Err(e) => {
+                self.action_steps.push(ActionStep::Error(format!("Failed to load SPHINCS+ public key: {}", e)));
+                self.status_message = Some("Register failed! Run 'qdum-vault init' first.".to_string());
+                return;
+            }
+        };
+
+        self.action_steps.push(ActionStep::Success("✓ SPHINCS+ public key loaded".to_string()));
+        self.action_steps.push(ActionStep::InProgress("Connecting to Solana devnet...".to_string()));
+
+        // Execute the register call
+        let keypair_path = self.keypair_path.to_str().unwrap();
+        let result = self.runtime.block_on(async {
+            self.vault_client.register_pq_account(
+                self.wallet,
+                keypair_path,
+                &sphincs_pubkey,
+            ).await
+        });
+
+        match result {
+            Ok(_) => {
+                self.action_steps.push(ActionStep::Success("✓ Transaction confirmed!".to_string()));
+                self.action_steps.push(ActionStep::Success("✓ Account registered successfully!".to_string()));
+                self.status_message = Some("Register completed!".to_string());
+                self.refresh_data();
+            }
+            Err(e) => {
+                self.action_steps.push(ActionStep::Error(format!("Registration failed: {}", e)));
+                self.status_message = Some("Register failed!".to_string());
+            }
         }
     }
 
     fn perform_lock_action(&mut self) {
-        if self.action_steps.is_empty() || matches!(self.action_steps.last(), Some(ActionStep::Starting)) {
-            self.action_steps.clear();
-            self.action_steps.push(ActionStep::InProgress("Generating lock challenge...".to_string()));
-            self.action_steps.push(ActionStep::InProgress("Sending lock transaction...".to_string()));
-            self.action_steps.push(ActionStep::InProgress("Confirming on-chain...".to_string()));
-            self.action_steps.push(ActionStep::Success("✓ Vault locked successfully!".to_string()));
-            self.status_message = Some("Lock completed!".to_string());
+        if !self.action_steps.is_empty() && !matches!(self.action_steps.last(), Some(ActionStep::Starting)) {
+            return; // Already executed
+        }
+
+        self.action_steps.clear();
+        self.action_steps.push(ActionStep::InProgress("Checking account status...".to_string()));
+
+        // Execute the lock call
+        let keypair_path = self.keypair_path.to_str().unwrap();
+        let result = self.runtime.block_on(async {
+            self.vault_client.lock_vault(self.wallet, keypair_path).await
+        });
+
+        match result {
+            Ok(_) => {
+                self.action_steps.push(ActionStep::Success("✓ Transaction confirmed!".to_string()));
+                self.action_steps.push(ActionStep::Success("✓ Vault locked successfully!".to_string()));
+                self.status_message = Some("Lock completed!".to_string());
+                self.refresh_data();
+            }
+            Err(e) => {
+                self.action_steps.push(ActionStep::Error(format!("Lock failed: {}", e)));
+                self.status_message = Some("Lock failed!".to_string());
+            }
         }
     }
 
     fn perform_unlock_action(&mut self) {
-        if self.action_steps.is_empty() || matches!(self.action_steps.last(), Some(ActionStep::Starting)) {
-            self.action_steps.clear();
-            self.action_steps.push(ActionStep::InProgress("Reading SPHINCS+ private key...".to_string()));
-            self.action_steps.push(ActionStep::InProgress("Generating quantum signature...".to_string()));
-            self.action_steps.push(ActionStep::InProgress("Submitting 44 verification transactions...".to_string()));
-            self.action_steps.push(ActionStep::InProgress("Verifying signatures on-chain...".to_string()));
-            self.action_steps.push(ActionStep::Success("✓ Vault unlocked successfully!".to_string()));
-            self.status_message = Some("Unlock completed!".to_string());
+        if !self.action_steps.is_empty() && !matches!(self.action_steps.last(), Some(ActionStep::Starting)) {
+            return; // Already executed
+        }
+
+        self.action_steps.clear();
+        self.action_steps.push(ActionStep::InProgress("Loading SPHINCS+ private key...".to_string()));
+
+        // Load SPHINCS+ private key
+        let key_manager = match SphincsKeyManager::new(None) {
+            Ok(km) => km,
+            Err(e) => {
+                self.action_steps.push(ActionStep::Error(format!("Failed to initialize key manager: {}", e)));
+                self.status_message = Some("Unlock failed!".to_string());
+                return;
+            }
+        };
+
+        let sphincs_privkey = match key_manager.load_private_key(None) {
+            Ok(pk) => pk,
+            Err(e) => {
+                self.action_steps.push(ActionStep::Error(format!("Failed to load SPHINCS+ private key: {}", e)));
+                self.status_message = Some("Unlock failed! Run 'qdum-vault init' first.".to_string());
+                return;
+            }
+        };
+
+        self.action_steps.push(ActionStep::Success("✓ SPHINCS+ private key loaded".to_string()));
+        self.action_steps.push(ActionStep::InProgress("Generating quantum signature (this may take a moment)...".to_string()));
+
+        // Execute the unlock call
+        let keypair_path = self.keypair_path.to_str().unwrap();
+        let result = self.runtime.block_on(async {
+            self.vault_client.unlock_vault(
+                self.wallet,
+                keypair_path,
+                &sphincs_privkey,
+            ).await
+        });
+
+        match result {
+            Ok(_) => {
+                self.action_steps.push(ActionStep::Success("✓ Signature generated!".to_string()));
+                self.action_steps.push(ActionStep::Success("✓ 44 verification transactions submitted!".to_string()));
+                self.action_steps.push(ActionStep::Success("✓ Vault unlocked successfully!".to_string()));
+                self.status_message = Some("Unlock completed!".to_string());
+                self.refresh_data();
+            }
+            Err(e) => {
+                self.action_steps.push(ActionStep::Error(format!("Unlock failed: {}", e)));
+                self.status_message = Some("Unlock failed!".to_string());
+            }
         }
     }
 

@@ -506,7 +506,7 @@ async fn main() -> Result<()> {
                 kp_pathbuf,
                 cli.rpc_url.clone(),
                 program_id,
-            );
+            )?;
             dashboard.run()?;
         }
 
