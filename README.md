@@ -155,19 +155,6 @@ Transfer QDUM tokens to another wallet:
 - Example: 10,000 QDUM = 10000000000 base units
 - Utilizes Token-2022 transfer hooks for enhanced security
 
-### 8. Set Token Metadata (Authority Only)
-```bash
-qdum-vault set-metadata \
-  --authority /path/to/authority-keypair.json \
-  --mint YOUR_MINT_ADDRESS \
-  --name "Quantdum" \
-  --symbol "QDUM" \
-  --uri "https://github.com/quantdum/qdum-vault" \
-  --description "Quantum-resistant token on Solana using SPHINCS+ post-quantum signatures"
-```
-
-Set on-chain metadata for your token (requires program authority).
-
 ## Configuration
 
 ### Change RPC Endpoint

@@ -4,7 +4,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
-    instruction::{AccountMeta, Instruction},
+    instruction::Instruction,
     pubkey::Pubkey,
     signature::{Keypair, Signer},
     transaction::Transaction,
@@ -1131,99 +1131,6 @@ impl VaultClient {
         println!("{} {}", "   Transaction:".bold(), signature.to_string().cyan());
         println!();
         println!("{}", format!("   View on Solscan: https://solscan.io/tx/{}?cluster=devnet", signature).dimmed());
-        println!();
-
-        Ok(())
-    }
-
-    /// Get mint status and display public supply statistics
-    pub async fn set_token_metadata(
-        &self,
-        authority: &Keypair,
-        mint: Pubkey,
-        name: String,
-        symbol: String,
-        uri: String,
-        description: String,
-    ) -> Result<()> {
-        use solana_sdk::system_program;
-
-        // Derive metadata PDA
-        let (metadata_pda, _bump) = Pubkey::find_program_address(
-            &[b"metadata", mint.as_ref()],
-            &self.program_id,
-        );
-
-        println!("{} {}", "Metadata PDA:".bold(), metadata_pda.to_string().bright_cyan());
-        println!();
-
-        // Build instruction data (discriminator + borsh-serialized args)
-        let mut ix_data = Vec::new();
-
-        // Calculate discriminator: sighash("global:update_token_metadata")
-        let discriminator = {
-            use sha2::{Digest, Sha256};
-            let mut hasher = Sha256::new();
-            hasher.update(b"global:update_token_metadata");
-            let result = hasher.finalize();
-            [result[0], result[1], result[2], result[3], result[4], result[5], result[6], result[7]]
-        };
-
-        ix_data.extend_from_slice(&discriminator);
-
-        // Serialize arguments using borsh
-        use std::io::Write;
-        let mut cursor = std::io::Cursor::new(&mut ix_data);
-        cursor.set_position(8); // After discriminator
-
-        // Write each string with its length prefix (borsh format)
-        let name_bytes = name.as_bytes();
-        cursor.write_all(&(name_bytes.len() as u32).to_le_bytes())?;
-        cursor.write_all(name_bytes)?;
-
-        let symbol_bytes = symbol.as_bytes();
-        cursor.write_all(&(symbol_bytes.len() as u32).to_le_bytes())?;
-        cursor.write_all(symbol_bytes)?;
-
-        let uri_bytes = uri.as_bytes();
-        cursor.write_all(&(uri_bytes.len() as u32).to_le_bytes())?;
-        cursor.write_all(uri_bytes)?;
-
-        let description_bytes = description.as_bytes();
-        cursor.write_all(&(description_bytes.len() as u32).to_le_bytes())?;
-        cursor.write_all(description_bytes)?;
-
-        let instruction = Instruction {
-            program_id: self.program_id,
-            accounts: vec![
-                AccountMeta::new(metadata_pda, false),
-                AccountMeta::new_readonly(mint, false),
-                AccountMeta::new(authority.pubkey(), true),
-                AccountMeta::new_readonly(system_program::ID, false),
-            ],
-            data: ix_data,
-        };
-
-        let recent_blockhash = self.rpc_client.get_latest_blockhash()?;
-        let transaction = Transaction::new_signed_with_payer(
-            &[instruction],
-            Some(&authority.pubkey()),
-            &[authority],
-            recent_blockhash,
-        );
-
-        println!("{}", "📤 Sending transaction...".bright_yellow());
-
-        let signature = self.rpc_client.send_and_confirm_transaction(&transaction)?;
-
-        println!();
-        println!("{}", "╔═══════════════════════════════════════════════════════════╗".bright_green());
-        println!("{}", "║            ✅ METADATA SET SUCCESSFULLY                   ║".bright_green().bold());
-        println!("{}", "╚═══════════════════════════════════════════════════════════╝".bright_green());
-        println!();
-        println!("{}  {}", "Transaction:".bold(), signature.to_string().bright_cyan());
-        println!();
-        println!("The metadata should now be visible on-chain!");
         println!();
 
         Ok(())

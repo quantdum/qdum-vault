@@ -4,7 +4,7 @@ use colored::Colorize;
 use comfy_table::{Table, presets::UTF8_FULL};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
-use solana_sdk::{pubkey::Pubkey, signature::{Keypair, Signer}};
+use solana_sdk::{pubkey::Pubkey, signature::Keypair};
 use std::fs;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -141,33 +141,6 @@ enum Commands {
         /// Mint address (defaults to QDUM devnet mint)
         #[arg(long, default_value = "3V6ogu16de86nChsmC5wHMKJmCx5YdGXA6fbp3y3497n")]
         mint: String,
-    },
-
-    /// Set token metadata (name, symbol, website, description)
-    SetMetadata {
-        /// Path to authority keypair (must be the program authority)
-        #[arg(long)]
-        authority: String,
-
-        /// Mint address
-        #[arg(long)]
-        mint: String,
-
-        /// Token name (max 32 chars)
-        #[arg(long)]
-        name: String,
-
-        /// Token symbol (max 10 chars)
-        #[arg(long)]
-        symbol: String,
-
-        /// Website/URI (max 200 chars)
-        #[arg(long)]
-        uri: String,
-
-        /// Description (max 100 chars)
-        #[arg(long)]
-        description: String,
     },
 }
 
@@ -450,25 +423,6 @@ async fn main() -> Result<()> {
             cmd_transfer(&cli.rpc_url, program_id, wallet_pubkey, &kp_path, recipient, mint_pubkey, amount).await?;
         }
 
-        Commands::SetMetadata { authority, mint, name, symbol, uri, description } => {
-            println!("{}", "🏷️  Quantdum Vault - Set Token Metadata".bold().cyan());
-            println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
-            println!();
-
-            let program_id = Pubkey::from_str(&cli.program_id)?;
-            let mint_pubkey = Pubkey::from_str(&mint)?;
-
-            cmd_set_metadata(
-                &cli.rpc_url,
-                program_id,
-                &authority,
-                mint_pubkey,
-                name,
-                symbol,
-                uri,
-                description
-            ).await?;
-        }
     }
 
     Ok(())
@@ -679,35 +633,3 @@ async fn cmd_transfer(
     Ok(())
 }
 
-async fn cmd_set_metadata(
-    rpc_url: &str,
-    program_id: Pubkey,
-    authority_path: &str,
-    mint: Pubkey,
-    name: String,
-    symbol: String,
-    uri: String,
-    description: String,
-) -> Result<()> {
-    let client = VaultClient::new(rpc_url, program_id)?;
-
-    let data = fs::read_to_string(authority_path)
-        .context(format!("Failed to read authority keypair file: {}", authority_path))?;
-    let bytes: Vec<u8> = serde_json::from_str(&data)
-        .context("Invalid keypair JSON format")?;
-    let authority = Keypair::try_from(&bytes[..])
-        .context("Invalid keypair bytes")?;
-
-    println!("{} {}", "Authority:".bold(), authority.pubkey().to_string().yellow());
-    println!("{} {}", "Mint:     ".bold(), mint.to_string().yellow());
-    println!();
-    println!("{} {}", "Name:       ".bold(), name.bright_white());
-    println!("{} {}", "Symbol:     ".bold(), symbol.bright_white());
-    println!("{} {}", "URI:        ".bold(), uri.bright_white());
-    println!("{} {}", "Description:".bold(), description.bright_white());
-    println!();
-
-    client.set_token_metadata(&authority, mint, name, symbol, uri, description).await?;
-
-    Ok(())
-}
