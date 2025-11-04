@@ -157,197 +157,47 @@ fn get_styles() -> clap::builder::Styles {
 }
 
 fn print_banner() {
-    use std::io::{self, Write};
-    use std::thread;
-
     println!();
 
-    // Green initialization effect
-    for _ in 0..3 {
-        print!("\r{}", "▓▒░ INITIALIZING ░▒▓".on_black().bright_green().blink());
-        io::stdout().flush().unwrap();
-        thread::sleep(Duration::from_millis(80));
-        print!("\r{}", "░▒▓ INITIALIZING ▓▒░".on_black().green().blink());
-        io::stdout().flush().unwrap();
-        thread::sleep(Duration::from_millis(80));
-    }
-    print!("\r{}", " ".repeat(50));
-    print!("\r");
-    io::stdout().flush().unwrap();
+    // Clean, professional banner inspired by GitHub CLI and Stripe CLI
+    let title = format!("{}  {}",
+        "QDUM".bright_green().bold(),
+        "Quantum Vault".bright_white());
+    let subtitle = "Post-Quantum Security for Solana".dimmed();
 
-    // Top border
-    println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_green());
-    thread::sleep(Duration::from_millis(30));
-
-    // Top ornamental border - animated guilloche pattern
-    for frame in 0..3 {
-        let ornament = match frame {
-            0 => "║◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇║",
-            1 => "║◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆║",
-            _ => "║◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇║",
-        };
-        if frame > 0 {
-            print!("\x1B[1A\r");
-        }
-        println!("{}", ornament.on_black().bright_green());
-        io::stdout().flush().unwrap();
-        thread::sleep(Duration::from_millis(100));
-    }
-
-    // Currency-style filigree pattern (animated)
-    for frame in 0..3 {
-        let filigree = match frame {
-            0 => "║▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░║",
-            1 => "║░░▒▒▓▓░░▒▒▓▓░░▒▒▓▓░░▒▒▓▓░░▒▒▓▓░░▒▒▓▓░░▒▒▓▓░░▒▒▓▓░░▒▒▓▓░░▒▒▓▓║",
-            _ => "║▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓▒▒░░▓▓║",
-        };
-        if frame > 0 {
-            print!("\x1B[1A\r");
-        }
-        println!("{}", filigree.on_black().green());
-        io::stdout().flush().unwrap();
-        thread::sleep(Duration::from_millis(100));
-    }
-
-    println!("{}", "║                                                           ║".on_black().bright_green());
-
-    // Logo lines
-    let logo_lines = vec![
-        "║   ██████╗ ██████╗ ██╗   ██╗███╗   ███╗                   ║",
-        "║  ██╔═══██╗██╔══██╗██║   ██║████╗ ████║                   ║",
-        "║  ██║   ██║██║  ██║██║   ██║██╔████╔██║                   ║",
-        "║  ██║▄▄ ██║██║  ██║██║   ██║██║╚██╔╝██║                   ║",
-        "║  ╚██████╔╝██████╔╝╚██████╔╝██║ ╚═╝ ██║                   ║",
-        "║   ╚══▀▀═╝ ╚═════╝  ╚═════╝ ╚═╝     ╚═╝                   ║",
-    ];
-
-    for line in &logo_lines {
-        println!("{}", line.on_black().bright_green().bold());
-        thread::sleep(Duration::from_millis(40));
-    }
-
-    println!("{}", "║                                                           ║".on_black().bright_green());
-
-    // Middle ornamental border - wave pattern
-    for frame in 0..3 {
-        let ornament = match frame {
-            0 => "║═══════════════════════════════════════════════════════════║",
-            1 => "║───────────────────────────────────────────────────────────║",
-            _ => "║═══════════════════════════════════════════════════════════║",
-        };
-        if frame > 0 {
-            print!("\x1B[1A\r");
-        }
-        println!("{}", ornament.on_black().bright_green());
-        io::stdout().flush().unwrap();
-        thread::sleep(Duration::from_millis(100));
-    }
-
-    // Pulsing title - all green
-    for i in 0..3 {
-        if i % 2 == 0 {
-            println!("{}", "║             Q U A N T U M   V A U L T                     ║".on_black().bright_green().bold());
-        } else {
-            println!("{}", "║             Q U A N T U M   V A U L T                     ║".on_black().green().bold());
-        }
-        if i < 2 {
-            thread::sleep(Duration::from_millis(180));
-            print!("\x1B[1A\r");
-        }
-    }
-
-    println!("{}", "║                                                           ║".on_black().bright_green());
-    println!("{}", "║              [ SPHINCS+ POST-QUANTUM ]                    ║".on_black().bright_green());
-    println!("{}", "║                                                           ║".on_black().bright_green());
-    thread::sleep(Duration::from_millis(30));
-
-    // Currency-style interlocking circles pattern (animated)
-    for frame in 0..3 {
-        let pattern = match frame {
-            0 => "║◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎║",
-            1 => "║◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉║",
-            _ => "║◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎◉◎║",
-        };
-        if frame > 0 {
-            print!("\x1B[1A\r");
-        }
-        println!("{}", pattern.on_black().bright_green());
-        io::stdout().flush().unwrap();
-        thread::sleep(Duration::from_millis(100));
-    }
-
-    // Bottom ornamental border - rosette pattern
-    for frame in 0..3 {
-        let ornament = match frame {
-            0 => "║◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉║",
-            1 => "║◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈║",
-            _ => "║◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉║",
-        };
-        if frame > 0 {
-            print!("\x1B[1A\r");
-        }
-        println!("{}", ornament.on_black().bright_green());
-        io::stdout().flush().unwrap();
-        thread::sleep(Duration::from_millis(100));
-    }
-
-    // Lathe work pattern (animated)
-    for frame in 0..3 {
-        let lathe = match frame {
-            0 => "║░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░║",
-            1 => "║▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒║",
-            _ => "║▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░▒▓║",
-        };
-        if frame > 0 {
-            print!("\x1B[1A\r");
-        }
-        println!("{}", lathe.on_black().green());
-        io::stdout().flush().unwrap();
-        thread::sleep(Duration::from_millis(100));
-    }
-
-    println!("{}", "╚═══════════════════════════════════════════════════════════╝".on_black().bright_green());
+    println!("{}", "  ╔════════════════════════════════════════════════════╗".bright_green());
+    println!("{}", "  ║                                                    ║".bright_green());
+    println!("  ║   {}                             ║", title);
+    println!("  ║   {}                  ║", subtitle);
+    println!("{}", "  ║                                                    ║".bright_green());
+    println!("{}", "  ╚════════════════════════════════════════════════════╝".bright_green());
     println!();
 
-    // Status display - all green
-    let status_text = "  SECURE VAULT STATUS";
-    print!("  ");
-    for ch in status_text.chars().skip(2) {
-        print!("{}", ch.to_string().on_black().bright_green().bold());
-        io::stdout().flush().unwrap();
-        thread::sleep(Duration::from_millis(15));
-    }
-    println!();
-    thread::sleep(Duration::from_millis(100));
+    // Quick info table
+    let mut info_table = Table::new();
+    info_table.load_preset(comfy_table::presets::NOTHING);
+    info_table
+        .add_row(vec![
+            "  Security".dimmed().to_string(),
+            "SPHINCS+ (NIST FIPS 205)".bright_green().to_string()
+        ])
+        .add_row(vec![
+            "  Network".dimmed().to_string(),
+            "Solana Devnet".bright_cyan().to_string()
+        ])
+        .add_row(vec![
+            "  Version".dimmed().to_string(),
+            env!("CARGO_PKG_VERSION").bright_yellow().to_string()
+        ]);
 
-    // Status indicators - all green
-    println!("{} {}", "  | SECURITY:".on_black().bright_green().bold(), "NIST FIPS 205 [ACTIVE]".on_black().green());
-    thread::sleep(Duration::from_millis(50));
-    println!("{} {}", "  | NETWORK: ".on_black().bright_green().bold(), "SOLANA DEVNET".on_black().green());
-    thread::sleep(Duration::from_millis(50));
-    println!("{} {}", "  | QUANTUM: ".on_black().bright_green().bold(), "RESISTANT [OK]".on_black().bright_green().bold());
-    thread::sleep(Duration::from_millis(100));
+    println!("{}", info_table);
     println!();
 }
 
-fn print_command_header(text: &str, _color: &str) {
-    use std::io::{self, Write};
-    use std::thread;
-
+fn print_command_header(text: &str, icon: colored::ColoredString) {
     println!();
-
-    // All green command header
-    let header = format!("▓▒░ {} ░▒▓", text);
-    println!("{}", header.on_black().bright_green().bold());
-
-    // Animated separator - all green
-    let sep = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
-    for chunk in sep.chars().collect::<Vec<_>>().chunks(5) {
-        print!("{}", chunk.iter().collect::<String>().on_black().green());
-        io::stdout().flush().unwrap();
-        thread::sleep(Duration::from_millis(10));
-    }
-    println!();
+    println!("{} {}", icon, text.bright_white().bold());
+    println!("{}", "─".repeat(60).dimmed());
     println!();
 }
 
@@ -425,13 +275,13 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Init { output_dir } => {
-            print_command_header("KEY GENERATION", "cyan");
+            print_command_header("Initialize Quantum Keypair", "[INIT]".bright_green());
 
             cmd_init(output_dir).await?;
         }
 
         Commands::Config { keypair, show } => {
-            print_command_header("CONFIGURATION", "cyan");
+            print_command_header("Configuration", "[CONFIG]".bright_cyan());
 
             let mut config = load_config();
 
@@ -466,7 +316,7 @@ async fn main() -> Result<()> {
             keypair,
             sphincs_pubkey,
         } => {
-            print_command_header("REGISTER PQ ACCOUNT", "cyan");
+            print_command_header("Register Post-Quantum Account", "[REGISTER]".bright_cyan());
 
             let program_id = Pubkey::from_str(&cli.program_id)?;
 
@@ -489,7 +339,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::Lock { keypair } => {
-            print_command_header("VAULT LOCKDOWN", "red");
+            print_command_header("Lock Vault", "[LOCK]".bright_red());
 
             let program_id = Pubkey::from_str(&cli.program_id)?;
 
@@ -508,7 +358,7 @@ async fn main() -> Result<()> {
             keypair,
             sphincs_privkey,
         } => {
-            print_command_header("VAULT UNLOCK", "green");
+            print_command_header("Unlock Vault", "[UNLOCK]".bright_green());
 
             let program_id = Pubkey::from_str(&cli.program_id)?;
 
@@ -531,7 +381,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::Status { keypair } => {
-            print_command_header("STATUS CHECK", "cyan");
+            print_command_header("Vault Status", "[STATUS]".bright_cyan());
 
             let program_id = Pubkey::from_str(&cli.program_id)?;
 
@@ -547,7 +397,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::Balance { keypair, mint } => {
-            print_command_header("BALANCE CHECK", "cyan");
+            print_command_header("Check Balance", "[BALANCE]".bright_cyan());
 
             // Auto-detect keypair and wallet
             let keypair_path = keypair.unwrap_or_else(|| get_default_keypair_path());
@@ -563,7 +413,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::Transfer { keypair, to, amount, mint } => {
-            print_command_header("TOKEN TRANSFER", "yellow");
+            print_command_header("Transfer Tokens", "[TRANSFER]".bright_yellow());
 
             let program_id = Pubkey::from_str(&cli.program_id)?;
 
@@ -590,19 +440,12 @@ async fn cmd_init(output_dir: Option<String>) -> Result<()> {
     use std::io::{self, Write};
     use solana_sdk::signature::{Keypair, Signer};
 
-    println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_green());
-    println!("{}", "║                                                           ║".on_black().bright_green());
-    println!("{}", "║       INITIALIZING QUANTUM KEYPAIR GENERATION             ║".on_black().bright_green().bold());
-    println!("{}", "║                                                           ║".on_black().bright_green());
-    println!("{}", "╚═══════════════════════════════════════════════════════════╝".on_black().bright_green());
-    println!();
-
     // Spinner for SPHINCS+ key generation
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
         ProgressStyle::default_spinner()
             .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
-            .template("{spinner:.magenta} {msg}")
+            .template("{spinner:.green} {msg}")
             .unwrap()
     );
     spinner.enable_steady_tick(Duration::from_millis(80));
@@ -612,7 +455,7 @@ async fn cmd_init(output_dir: Option<String>) -> Result<()> {
     let key_manager = SphincsKeyManager::new(output_dir.clone())?;
     key_manager.generate_and_save_keypair()?;
 
-    spinner.finish_with_message(format!("{}", "[OK] SPHINCS+ keypair generated".bright_green()));
+    spinner.finish_with_message(format!("{} SPHINCS+ keypair generated", "[✓]".bright_green().bold()));
 
     // Spinner for Solana keypair
     let spinner = ProgressBar::new_spinner();
@@ -642,7 +485,7 @@ async fn cmd_init(output_dir: Option<String>) -> Result<()> {
     let keypair_json = serde_json::to_string(&keypair_bytes.to_vec())?;
     fs::write(&keypair_path, keypair_json)?;
 
-    spinner.finish_with_message(format!("{}", "[OK] Solana keypair created".bright_green()));
+    spinner.finish_with_message(format!("{} Solana keypair created", "[✓]".bright_green().bold()));
 
     // Summary table
     println!();
@@ -650,38 +493,30 @@ async fn cmd_init(output_dir: Option<String>) -> Result<()> {
     table.load_preset(UTF8_FULL);
     table
         .set_header(vec![
-            "Component".bright_white().to_string(),
-            "Location".bright_white().to_string(),
-            "Size".bright_white().to_string()
+            "Component".bright_white().bold().to_string(),
+            "Location".bright_white().bold().to_string(),
         ])
         .add_row(vec![
-            "Private Key".bright_cyan().to_string(),
-            "~/.qdum/sphincs_private.key".bright_white().to_string(),
-            "64 bytes".bright_yellow().to_string()
+            "SPHINCS+ Private".dimmed().to_string(),
+            "~/.qdum/sphincs_private.key".bright_cyan().to_string(),
         ])
         .add_row(vec![
-            "Public Key".bright_cyan().to_string(),
-            "~/.qdum/sphincs_public.key".bright_white().to_string(),
-            "32 bytes".bright_yellow().to_string()
+            "SPHINCS+ Public".dimmed().to_string(),
+            "~/.qdum/sphincs_public.key".bright_cyan().to_string(),
         ])
         .add_row(vec![
-            "Solana Keypair".bright_cyan().to_string(),
-            keypair_path.display().to_string().bright_white().to_string(),
-            "JSON".bright_yellow().to_string()
+            "Solana Keypair".dimmed().to_string(),
+            keypair_path.display().to_string().bright_cyan().to_string(),
         ]);
 
     println!("{}", table);
     println!();
-    println!("{} {}", "Wallet Address:".bright_blue().bold(), wallet_address.to_string().bright_magenta());
+    println!("{} {}", "Wallet:".dimmed(), wallet_address.to_string().bright_green().bold());
     println!();
 
     // Ask if they want to set it as default
-    println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_green());
-    println!("{}", "║            INITIALIZATION COMPLETE [SUCCESS]              ║".on_black().bright_green().bold());
-    println!("{}", "╚═══════════════════════════════════════════════════════════╝".on_black().bright_green());
-    println!();
-
-    print!("{} ", "Set this as your default keypair? (y/n):".bright_yellow().bold());
+    print!("{} ", "Set as default keypair?".bright_white().bold());
+    print!("{} ", "(y/n)".dimmed());
     io::stdout().flush()?;
 
     let mut input = String::new();
@@ -694,16 +529,16 @@ async fn cmd_init(output_dir: Option<String>) -> Result<()> {
         save_config(&config)?;
 
         println!();
-        println!("{} {}", "[OK]".bright_green().bold(), "Default keypair configured!".bright_white().bold());
-        println!("  All commands will now use: {}", keypair_path.display().to_string().bright_green());
+        println!("{} Default keypair configured", "[✓]".bright_green().bold());
+        println!("{} {}", "  Path:".dimmed(), keypair_path.display().to_string().bright_cyan());
     } else {
         println!();
-        println!("  You can set it later with:");
+        println!("{} Skipped. Configure later with:", "[i]".bright_yellow());
         println!("  {}", format!("qdum-vault config --keypair {}", keypair_path.display()).dimmed());
     }
 
     println!();
-    println!("{} {}", "Next step:".bright_yellow().bold(), "qdum-vault register".bright_white().bold());
+    println!("{} {}", "Next:".bright_white().bold(), "qdum-vault register".bright_cyan());
     println!();
 
     Ok(())
