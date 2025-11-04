@@ -175,33 +175,35 @@ fn print_banner() {
     print!("\r");
     io::stdout().flush().unwrap();
 
-    // Animated scanline effect
-    println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_magenta());
+    // Dollar bill style border with ornate guilloche patterns
+    println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_green());
     thread::sleep(Duration::from_millis(30));
 
-    // Animated wave scanline - moves left to right
+    // Top ornamental border - dollar bill guilloche style
     for frame in 0..3 {
-        let scanline = match frame {
-            0 => "║▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ║",
-            1 => "║ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒ ║",
-            _ => "║░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓▒░ ▓ ║",
+        let ornament = match frame {
+            0 => "║◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆║",
+            1 => "║◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇║",
+            _ => "║◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆◇◆║",
         };
         if frame > 0 {
             print!("\x1B[1A\r");
         }
-        println!("{}", scanline.on_black().bright_magenta());
+        println!("{}", ornament.on_black().bright_green());
         io::stdout().flush().unwrap();
-        thread::sleep(Duration::from_millis(80));
+        thread::sleep(Duration::from_millis(100));
     }
 
     // Matrix-style reveal of logo lines
     let logo_lines = vec![
+        "║                                                           ║",
         "║   ██████╗ ██████╗ ██╗   ██╗███╗   ███╗                   ║",
         "║  ██╔═══██╗██╔══██╗██║   ██║████╗ ████║                   ║",
         "║  ██║   ██║██║  ██║██║   ██║██╔████╔██║                   ║",
         "║  ██║▄▄ ██║██║  ██║██║   ██║██║╚██╔╝██║                   ║",
         "║  ╚██████╔╝██████╔╝╚██████╔╝██║ ╚═╝ ██║                   ║",
         "║   ╚══▀▀═╝ ╚═════╝  ╚═════╝ ╚═╝     ╚═╝                   ║",
+        "║                                                           ║",
     ];
 
     for line in &logo_lines {
@@ -209,27 +211,27 @@ fn print_banner() {
         thread::sleep(Duration::from_millis(40));
     }
 
-    // Animated bottom scanline with different pattern
+    // Middle ornamental border
     for frame in 0..3 {
-        let scanline = match frame {
-            0 => "║░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░ ║",
-            1 => "║ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█  ║",
-            _ => "║█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓█ ░▒▓ ║",
+        let ornament = match frame {
+            0 => "║═══════════════════════════════════════════════════════════║",
+            1 => "║───────────────────────────────────────────────────────────║",
+            _ => "║═══════════════════════════════════════════════════════════║",
         };
         if frame > 0 {
             print!("\x1B[1A\r");
         }
-        println!("{}", scanline.on_black().bright_magenta());
+        println!("{}", ornament.on_black().bright_green());
         io::stdout().flush().unwrap();
-        thread::sleep(Duration::from_millis(80));
+        thread::sleep(Duration::from_millis(100));
     }
 
-    // Pulsing title with more dramatic effect
+    // Pulsing title with dollar bill gold/green colors
     for i in 0..3 {
         if i % 2 == 0 {
-            println!("{}", "║          ⚛️  Q U A N T U M   V A U L T  ⚛️              ║".on_black().bright_magenta().bold());
+            println!("{}", "║          ⚛️  Q U A N T U M   V A U L T  ⚛️              ║".on_black().bright_yellow().bold());
         } else {
-            println!("{}", "║          ⚛️  Q U A N T U M   V A U L T  ⚛️              ║".on_black().bright_cyan().bold());
+            println!("{}", "║          ⚛️  Q U A N T U M   V A U L T  ⚛️              ║".on_black().bright_green().bold());
         }
         if i < 2 {
             thread::sleep(Duration::from_millis(180));
@@ -237,25 +239,27 @@ fn print_banner() {
         }
     }
 
-    println!("{}", "║              [ SPHINCS+ POST-QUANTUM ]                    ║".on_black().bright_green());
+    println!("{}", "║                                                           ║".on_black().bright_green());
+    println!("{}", "║              [ SPHINCS+ POST-QUANTUM ]                    ║".on_black().bright_white());
+    println!("{}", "║                                                           ║".on_black().bright_green());
     thread::sleep(Duration::from_millis(30));
 
-    // Animated closing scanline with pulsing effect
+    // Bottom ornamental border - dollar bill style rosette pattern
     for frame in 0..3 {
-        let scanline = match frame {
-            0 => "║░░▒▒▓▓██ ░░▒▒▓▓██ ░░▒▒▓▓██ ░░▒▒▓▓██ ░░▒▒▓▓██ ░░▒▒▓▓██ ░░║",
-            1 => "║▒▒▓▓██░░ ▒▒▓▓██░░ ▒▒▓▓██░░ ▒▒▓▓██░░ ▒▒▓▓██░░ ▒▒▓▓██░░ ▒║",
-            _ => "║▓▓██░░▒▒ ▓▓██░░▒▒ ▓▓██░░▒▒ ▓▓██░░▒▒ ▓▓██░░▒▒ ▓▓██░░▒▒ ▓║",
+        let ornament = match frame {
+            0 => "║◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈║",
+            1 => "║◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉║",
+            _ => "║◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈◉◈║",
         };
         if frame > 0 {
             print!("\x1B[1A\r");
         }
-        println!("{}", scanline.on_black().bright_magenta());
+        println!("{}", ornament.on_black().bright_green());
         io::stdout().flush().unwrap();
-        thread::sleep(Duration::from_millis(80));
+        thread::sleep(Duration::from_millis(100));
     }
 
-    println!("{}", "╚═══════════════════════════════════════════════════════════╝".on_black().bright_magenta());
+    println!("{}", "╚═══════════════════════════════════════════════════════════╝".on_black().bright_green());
     println!();
 
     // Typing effect for status
