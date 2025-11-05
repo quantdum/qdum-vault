@@ -8,6 +8,8 @@ use solana_sdk::{pubkey::Pubkey, signature::Keypair};
 use std::fs;
 use std::path::PathBuf;
 use std::str::FromStr;
+
+mod icons;
 use std::time::Duration;
 
 mod crypto;
@@ -501,11 +503,15 @@ async fn main() -> Result<()> {
 
             let kp_pathbuf = PathBuf::from(kp_path);
 
+            // Default QDUM devnet mint
+            let mint = Pubkey::from_str("3V6ogu16de86nChsmC5wHMKJmCx5YdGXA6fbp3y3497n")?;
+
             let mut dashboard = Dashboard::new(
                 wallet_pubkey,
                 kp_pathbuf,
                 cli.rpc_url.clone(),
                 program_id,
+                mint,
             )?;
             dashboard.run()?;
         }
@@ -638,7 +644,7 @@ async fn cmd_register(
     let key_manager = SphincsKeyManager::new(None)?;
     let sphincs_pubkey = key_manager.load_public_key(sphincs_pubkey_path)?;
 
-    let mut client = VaultClient::new(rpc_url, program_id)?;
+    let client = VaultClient::new(rpc_url, program_id)?;
     client.register_pq_account(wallet, keypair_path, &sphincs_pubkey).await?;
 
     Ok(())
@@ -650,7 +656,7 @@ async fn cmd_lock(
     wallet: Pubkey,
     keypair_path: &str,
 ) -> Result<()> {
-    let mut client = VaultClient::new(rpc_url, program_id)?;
+    let client = VaultClient::new(rpc_url, program_id)?;
     client.lock_vault(wallet, keypair_path).await?;
 
     Ok(())
@@ -666,8 +672,8 @@ async fn cmd_unlock(
     let key_manager = SphincsKeyManager::new(None)?;
     let sphincs_privkey = key_manager.load_private_key(sphincs_privkey_path)?;
 
-    let mut client = VaultClient::new(rpc_url, program_id)?;
-    client.unlock_vault(wallet, keypair_path, &sphincs_privkey).await?;
+    let client = VaultClient::new(rpc_url, program_id)?;
+    client.unlock_vault(wallet, keypair_path, &sphincs_privkey, None).await?;
 
     Ok(())
 }

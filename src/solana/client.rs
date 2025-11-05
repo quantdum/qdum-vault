@@ -4,7 +4,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
-    instruction::Instruction,
+    instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
     signature::{Keypair, Signer},
     transaction::Transaction,
@@ -13,6 +13,10 @@ use std::fs;
 use std::time::Duration;
 
 use crate::crypto::sphincs::{SphincsKeyManager, SPHINCS_PUBKEY_SIZE, SPHINCS_SIGNATURE_SIZE};
+
+/// Progress callback type for TUI integration
+/// (step_number, total_steps, message)
+pub type ProgressCallback = Box<dyn FnMut(usize, usize, String) + Send>;
 
 /// PDA seeds
 const PQ_ACCOUNT_SEED: &[u8] = b"pq_account";
@@ -90,7 +94,7 @@ impl VaultClient {
 
     /// Register SPHINCS+ public key on-chain
     pub async fn register_pq_account(
-        &mut self,
+        &self,
         wallet: Pubkey,
         keypair_path: &str,
         sphincs_pubkey: &[u8; SPHINCS_PUBKEY_SIZE],
@@ -152,7 +156,7 @@ impl VaultClient {
     }
 
     /// Lock the vault
-    pub async fn lock_vault(&mut self, wallet: Pubkey, keypair_path: &str) -> Result<()> {
+    pub async fn lock_vault(&self, wallet: Pubkey, keypair_path: &str) -> Result<()> {
         println!("Wallet Address: {}", wallet.to_string().cyan());
         println!();
 
@@ -221,10 +225,11 @@ impl VaultClient {
 
     /// Unlock the vault (multi-step SPHINCS+ verification process)
     pub async fn unlock_vault(
-        &mut self,
+        &self,
         wallet: Pubkey,
         keypair_path: &str,
         sphincs_privkey: &[u8; 64],
+        mut progress_callback: Option<Box<dyn FnMut(usize, usize, String) + Send>>,
     ) -> Result<()> {
         println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_magenta());
         println!("{}", "║                                                           ║".on_black().bright_magenta());
@@ -264,6 +269,19 @@ impl VaultClient {
         let key_manager = SphincsKeyManager::new(None)?;
         let sphincs_pubkey = key_manager.load_public_key(None)?;
 
+        // Calculate total steps for progress tracking
+        // 1 signature gen + 1 init storage + 10 upload chunks + 33 verify steps + 1 finalize = 46 total
+        const CHUNK_SIZE: usize = 800;
+        let total_chunks = (SPHINCS_SIGNATURE_SIZE + CHUNK_SIZE - 1) / CHUNK_SIZE;
+        let total_steps = 1 + 1 + total_chunks + 33 + 1;
+        let mut current_step = 0;
+
+        // Step 1: Generate signature
+        current_step += 1;
+        if let Some(ref mut cb) = progress_callback {
+            cb(current_step, total_steps, "Generating SPHINCS+ signature...".to_string());
+        }
+
         // Spinner for signature generation
         let spinner = ProgressBar::new_spinner();
         spinner.set_style(
@@ -281,10 +299,15 @@ impl VaultClient {
         spinner.finish_with_message(format!("{} {} bytes", "✓ Signature generated:".bright_green(), SPHINCS_SIGNATURE_SIZE.to_string().bright_yellow()));
         println!();
 
+        // Use fixed identifier so we can clean up old PDAs before creating new ones
+        let unique_identifier = "current".to_string();
+
+        // STEP 0: Close old PDAs if they exist (refund rent like quantdum-token does)
+        self.close_sphincs_pdas(&keypair, &unique_identifier).await.ok(); // Ignore error if PDAs don't exist
+
         // Derive signature storage PDA
-        let identifier = "unlock";
         let (signature_storage, _) = Pubkey::find_program_address(
-            &[b"sphincs_sig", keypair.pubkey().as_ref(), identifier.as_bytes()],
+            &[b"sphincs_sig", keypair.pubkey().as_ref(), unique_identifier.as_bytes()],
             &self.program_id,
         );
 
@@ -295,8 +318,7 @@ impl VaultClient {
         println!();
 
         // Step 2-9: Upload signature in chunks (800 bytes per tx - max allowed by on-chain program)
-        const CHUNK_SIZE: usize = 800;
-        let total_chunks = (SPHINCS_SIGNATURE_SIZE + CHUNK_SIZE - 1) / CHUNK_SIZE;
+        // Using CHUNK_SIZE from earlier calculation
         let total_phase1_steps = 1 + total_chunks;
 
         // Progress bar for Phase 1
@@ -308,17 +330,20 @@ impl VaultClient {
                 .progress_chars("━━╸")
         );
 
-        // Step 1: Initialize signature storage (or reuse existing)
-        pb_phase1.set_message(format!("{}", "Initializing storage...".bright_white()));
-
-        // Check if signature storage already exists
-        let storage_exists = self.rpc_client.get_account(&signature_storage).is_ok();
-        if !storage_exists {
-            self.initialize_sphincs_storage(&keypair, &signature_storage, identifier, &sphincs_pubkey, challenge).await?;
+        // Step 1: Initialize signature storage (always fresh with unique identifier)
+        current_step += 1;
+        if let Some(ref mut cb) = progress_callback {
+            cb(current_step, total_steps, "Initializing signature storage...".to_string());
         }
+        pb_phase1.set_message(format!("{}", "Initializing storage...".bright_white()));
+        self.initialize_sphincs_storage(&keypair, &signature_storage, &unique_identifier, &sphincs_pubkey, challenge).await?;
         pb_phase1.inc(1);
 
         for i in 0..total_chunks {
+            current_step += 1;
+            if let Some(ref mut cb) = progress_callback {
+                cb(current_step, total_steps, format!("Uploading signature chunk {}/{}", i + 1, total_chunks));
+            }
             let start = i * CHUNK_SIZE;
             let end = ((i + 1) * CHUNK_SIZE).min(SPHINCS_SIGNATURE_SIZE);
             let chunk = &signature[start..end];
@@ -330,9 +355,9 @@ impl VaultClient {
         pb_phase1.finish_with_message(format!("{}", "✓ Upload complete".bright_green()));
         println!();
 
-        // Derive verification state PDA
+        // Derive verification state PDA (using same unique_identifier from signature storage)
         let (verification_state, _) = Pubkey::find_program_address(
-            &[b"sphincs_verify", keypair.pubkey().as_ref(), identifier.as_bytes()],
+            &[b"sphincs_verify", keypair.pubkey().as_ref(), unique_identifier.as_bytes()],
             &self.program_id,
         );
 
@@ -352,12 +377,16 @@ impl VaultClient {
         );
 
         // Step 0: Initialize verification state
+        current_step += 1;
+        if let Some(ref mut cb) = progress_callback {
+            cb(current_step, total_steps, "Initializing verification state...".to_string());
+        }
         pb_phase2.set_message(format!("{}", "Initializing verification...".bright_white()));
         self.sphincs_verify_step0_init(
             &keypair,
             &verification_state,
             &signature_storage,
-            identifier,
+            &unique_identifier,
             challenge,
             &sphincs_pubkey,
             0, // unlock_duration_slots (0 = immediate unlock)
@@ -365,38 +394,70 @@ impl VaultClient {
         pb_phase2.inc(1);
 
         // Steps 1-3: FORS verification
+        current_step += 1;
+        if let Some(ref mut cb) = progress_callback {
+            cb(current_step, total_steps, "Verifying FORS trees (batch 1/2)...".to_string());
+        }
         pb_phase2.set_message(format!("{}", "Verifying FORS trees 0-6...".bright_white()));
         self.sphincs_verify_fors_batch1(&keypair, &verification_state, &signature_storage).await?;
         pb_phase2.inc(1);
 
+        current_step += 1;
+        if let Some(ref mut cb) = progress_callback {
+            cb(current_step, total_steps, "Verifying FORS trees (batch 2/2)...".to_string());
+        }
         pb_phase2.set_message(format!("{}", "Verifying FORS trees 7-13...".bright_white()));
         self.sphincs_verify_fors_batch2(&keypair, &verification_state, &signature_storage).await?;
         pb_phase2.inc(1);
 
+        current_step += 1;
+        if let Some(ref mut cb) = progress_callback {
+            cb(current_step, total_steps, "Computing FORS root hash...".to_string());
+        }
         pb_phase2.set_message(format!("{}", "Computing FORS root...".bright_white()));
         self.sphincs_verify_fors_root(&keypair, &verification_state).await?;
         pb_phase2.inc(1);
 
         // Steps 4-31: Layer verification (7 layers × 4 steps each)
         for layer in 0..7 {
+            current_step += 1;
+            if let Some(ref mut cb) = progress_callback {
+                cb(current_step, total_steps, format!("Verifying layer {} - WOTS signature part 1/3", layer));
+            }
             pb_phase2.set_message(format!("{} {} - WOTS Part 1", "Layer".bright_white(), layer));
             self.sphincs_verify_layer_wots_part1(&keypair, &verification_state, &signature_storage, layer as u8).await?;
             pb_phase2.inc(1);
 
+            current_step += 1;
+            if let Some(ref mut cb) = progress_callback {
+                cb(current_step, total_steps, format!("Verifying layer {} - WOTS signature part 2/3", layer));
+            }
             pb_phase2.set_message(format!("{} {} - WOTS Part 2", "Layer".bright_white(), layer));
             self.sphincs_verify_layer_wots_part2(&keypair, &verification_state, &signature_storage, layer as u8).await?;
             pb_phase2.inc(1);
 
+            current_step += 1;
+            if let Some(ref mut cb) = progress_callback {
+                cb(current_step, total_steps, format!("Verifying layer {} - WOTS signature part 3/3", layer));
+            }
             pb_phase2.set_message(format!("{} {} - WOTS Part 3", "Layer".bright_white(), layer));
             self.sphincs_verify_layer_wots_part3(&keypair, &verification_state, &signature_storage, layer as u8).await?;
             pb_phase2.inc(1);
 
+            current_step += 1;
+            if let Some(ref mut cb) = progress_callback {
+                cb(current_step, total_steps, format!("Verifying layer {} - Merkle tree path", layer));
+            }
             pb_phase2.set_message(format!("{} {} - Merkle tree", "Layer".bright_white(), layer));
             self.sphincs_verify_layer_merkle(&keypair, &verification_state, &signature_storage, layer as u8).await?;
             pb_phase2.inc(1);
         }
 
         // Step 32 (33rd step): Finalize and unlock
+        current_step += 1;
+        if let Some(ref mut cb) = progress_callback {
+            cb(current_step, total_steps, "Finalizing and unlocking vault...".to_string());
+        }
         pb_phase2.set_message(format!("{}", "Finalizing and unlocking...".bright_white()));
         self.sphincs_verify_finalize(&keypair, &verification_state, &pq_account, wallet).await?;
         pb_phase2.inc(1);
@@ -945,6 +1006,40 @@ impl VaultClient {
         Ok(())
     }
 
+    /// Get vault status without printing (for dashboard)
+    pub async fn get_vault_status(&self, wallet: Pubkey) -> Result<(bool, Pubkey)> {
+        let (pq_account, _) = self.derive_pq_account(wallet);
+
+        let account_info = self.rpc_client.get_account(&pq_account)
+            .context("PQ account not found! Register first with: qdum-vault register")?;
+
+        // Parse account data to get is_locked status
+        let pubkey_len = u32::from_le_bytes(account_info.data[41..45].try_into().unwrap());
+        let tokens_locked_offset = 45 + pubkey_len as usize;
+        let is_locked = account_info.data[tokens_locked_offset];
+
+        Ok((is_locked == 1, pq_account))
+    }
+
+    /// Get token balance without printing (for dashboard)
+    /// Returns balance in base units (raw u64)
+    pub async fn get_balance(&self, wallet: Pubkey, mint: Pubkey) -> Result<u64> {
+        // Derive ATA (Associated Token Account)
+        let ata = get_associated_token_address(&wallet, &mint, &TOKEN_2022_PROGRAM_ID);
+
+        match self.rpc_client.get_account(&ata) {
+            Ok(account_info) => {
+                // Parse token account data (amount is at offset 64, 8 bytes little-endian)
+                let amount = u64::from_le_bytes(account_info.data[64..72].try_into().unwrap());
+                Ok(amount)
+            }
+            Err(_) => {
+                // Token account not found, return 0
+                Ok(0)
+            }
+        }
+    }
+
     /// Check token balance
     pub async fn check_balance(&self, wallet: Pubkey, mint: Pubkey) -> Result<()> {
         println!("Wallet Address: {}", wallet.to_string().cyan());
@@ -996,6 +1091,17 @@ impl VaultClient {
         recipient: Pubkey,
         mint: Pubkey,
         amount: u64,
+    ) -> Result<()> {
+        self.transfer_tokens_with_confirm(keypair, recipient, mint, amount, true).await
+    }
+
+    pub async fn transfer_tokens_with_confirm(
+        &self,
+        keypair: &Keypair,
+        recipient: Pubkey,
+        mint: Pubkey,
+        amount: u64,
+        skip_confirm: bool,
     ) -> Result<()> {
         use solana_sdk::instruction::Instruction;
         use std::io::{self, Write};
@@ -1064,21 +1170,23 @@ impl VaultClient {
             println!();
         }
 
-        // Confirmation prompt
-        print!("{}", "Proceed with transfer? (y/n): ".bright_green().bold());
-        io::stdout().flush()?;
+        // Confirmation prompt (only if not skipped)
+        if !skip_confirm {
+            print!("{}", "Proceed with transfer? (y/n): ".bright_green().bold());
+            io::stdout().flush()?;
 
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        let answer = input.trim().to_lowercase();
+            let mut input = String::new();
+            io::stdin().read_line(&mut input)?;
+            let answer = input.trim().to_lowercase();
 
-        if answer != "y" && answer != "yes" {
+            if answer != "y" && answer != "yes" {
+                println!();
+                println!("{}", "❌ Transfer cancelled".red());
+                return Ok(());
+            }
+
             println!();
-            println!("{}", "❌ Transfer cancelled".red());
-            return Ok(());
         }
-
-        println!();
 
         // Build transaction with ComputeBudget instructions (like Phantom does)
         let mut instructions = Vec::new();
@@ -1204,6 +1312,72 @@ impl VaultClient {
         println!();
         println!("{}", format!("   View on Solscan: https://solscan.io/tx/{}?cluster=devnet", signature).dimmed());
         println!();
+
+        Ok(())
+    }
+
+    /// Close old SPHINCS PDAs to refund rent (like quantdum-token does)
+    async fn close_sphincs_pdas(&self, keypair: &Keypair, unique_identifier: &str) -> Result<()> {
+        // Derive the PDAs we want to close
+        let (signature_storage, _) = Pubkey::find_program_address(
+            &[b"sphincs_sig", keypair.pubkey().as_ref(), unique_identifier.as_bytes()],
+            &self.program_id,
+        );
+        let (verification_state, _) = Pubkey::find_program_address(
+            &[b"sphincs_verify", keypair.pubkey().as_ref(), unique_identifier.as_bytes()],
+            &self.program_id,
+        );
+
+        // Check if accounts exist before trying to close
+        if self.rpc_client.get_account(&signature_storage).is_ok() {
+            // Close signature storage using discriminator 'global:close_verification_state'
+            let close_discriminator: [u8; 8] = [
+                0x20, 0x4f, 0x6f, 0xd5, 0x4e, 0x73, 0xa4, 0x9e
+            ]; // sha256('global:close_verification_state')[..8]
+
+            let close_ix = Instruction {
+                program_id: self.program_id,
+                accounts: vec![
+                    AccountMeta::new(signature_storage, false),
+                    AccountMeta::new(keypair.pubkey(), true),
+                ],
+                data: close_discriminator.to_vec(),
+            };
+
+            let recent_blockhash = self.rpc_client.get_latest_blockhash()?;
+            let transaction = Transaction::new_signed_with_payer(
+                &[close_ix],
+                Some(&keypair.pubkey()),
+                &[keypair],
+                recent_blockhash,
+            );
+            self.rpc_client.send_and_confirm_transaction(&transaction)?;
+        }
+
+        // Close verification state if it exists
+        if self.rpc_client.get_account(&verification_state).is_ok() {
+            let close_discriminator: [u8; 8] = [
+                0x20, 0x4f, 0x6f, 0xd5, 0x4e, 0x73, 0xa4, 0x9e
+            ];
+
+            let close_ix = Instruction {
+                program_id: self.program_id,
+                accounts: vec![
+                    AccountMeta::new(verification_state, false),
+                    AccountMeta::new(keypair.pubkey(), true),
+                ],
+                data: close_discriminator.to_vec(),
+            };
+
+            let recent_blockhash = self.rpc_client.get_latest_blockhash()?;
+            let transaction = Transaction::new_signed_with_payer(
+                &[close_ix],
+                Some(&keypair.pubkey()),
+                &[keypair],
+                recent_blockhash,
+            );
+            self.rpc_client.send_and_confirm_transaction(&transaction)?;
+        }
 
         Ok(())
     }
