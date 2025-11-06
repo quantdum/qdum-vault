@@ -1,14 +1,15 @@
-# QDUM Vault CLI
+# QDUM Vault
 
-Command-line tool for managing your quantum-resistant Quantdum token vault.
+Quantum-resistant vault management tool for Quantdum tokens with an interactive TUI dashboard.
 
 ## Features
 
+- 🖥️ **Interactive TUI Dashboard** - Elegant terminal interface for vault management
 - 🔐 **SPHINCS+-SHA2-128s** post-quantum signatures (NIST FIPS 205)
 - 🔒 **Vault Locking** with cryptographic challenges
-- ✅ **11-Step Verification** for on-chain signature validation
+- ✅ **44-Transaction Verification** for on-chain signature validation
 - 💸 **Token Transfers** with Token-2022 transfer hooks
-- 🏷️ **On-Chain Metadata** management
+- 📊 **Real-time Status** - Live vault and balance monitoring
 - 🌐 **Solana Integration** via RPC (devnet/mainnet)
 
 ## Tokenomics
@@ -97,63 +98,89 @@ cargo build
 
 ## Usage
 
-### 1. Generate SPHINCS+ Keypair
-```bash
-qdum-vault init
-```
+### TUI Dashboard (Recommended)
 
-Keys are saved to `~/.qdum/`:
-- `sphincs_private.key` (64 bytes)
-- `sphincs_public.key` (32 bytes)
+Launch the interactive dashboard for the best experience:
 
-### 2. Register Your Vault On-Chain
 ```bash
-qdum-vault register \
+qdum-vault dashboard \
   --wallet YOUR_WALLET_ADDRESS \
-  --keypair ~/.config/solana/id.json
-```
-
-### 3. Lock Your Vault
-```bash
-qdum-vault lock \
-  --wallet YOUR_WALLET_ADDRESS \
-  --keypair ~/.config/solana/id.json
-```
-
-### 4. Unlock Your Vault
-```bash
-qdum-vault unlock \
-  --wallet YOUR_WALLET_ADDRESS \
-  --keypair ~/.config/solana/id.json
-```
-
-This performs an 11-step SPHINCS+ signature verification on-chain.
-
-### 5. Check Status
-```bash
-qdum-vault status --wallet YOUR_WALLET_ADDRESS
-```
-
-### 6. Check Balance
-```bash
-qdum-vault balance \
   --keypair ~/.config/solana/id.json \
   --mint 3V6ogu16de86nChsmC5wHMKJmCx5YdGXA6fbp3y3497n
 ```
 
-### 7. Transfer QDUM Tokens
+**Dashboard Features:**
+- 📊 **Real-time vault status** - See if your vault is locked or unlocked
+- 💰 **Live balance display** - Monitor your QDUM token balance
+- 🔓 **Interactive unlock** - Visual progress through 44-transaction verification
+- 💸 **Easy transfers** - Transfer tokens with on-screen guidance
+- ⚡ **Quick actions** - Register, lock, and manage vault with keyboard shortcuts
+
+**Keyboard Controls:**
+- `U` - Unlock vault (44-step quantum verification)
+- `R` - Register vault on-chain
+- `L` - Lock vault
+- `T` - Transfer tokens
+- `Q` - Quit
+
+### First Time Setup
+
+1. **Generate SPHINCS+ Keypair**
+   ```bash
+   qdum-vault init
+   ```
+
+   Keys are saved to `~/.qdum/`:
+   - `sphincs_private.key` (64 bytes) - **Keep this safe!**
+   - `sphincs_public.key` (32 bytes)
+
+2. **Launch Dashboard and Register**
+   ```bash
+   qdum-vault dashboard \
+     --wallet YOUR_WALLET_ADDRESS \
+     --keypair ~/.config/solana/id.json \
+     --mint 3V6ogu16de86nChsmC5wHMKJmCx5YdGXA6fbp3y3497n
+   ```
+
+   Press `R` to register your vault on-chain.
+
+3. **Lock Your Vault**
+
+   Press `L` to lock your vault and secure your tokens.
+
+4. **Unlock When Needed**
+
+   Press `U` to unlock - watch the quantum verification process in real-time!
+
+### CLI Commands (Alternative)
+
+For scripting or automation, you can use individual commands:
+
 ```bash
+# Register vault
+qdum-vault register --wallet YOUR_WALLET --keypair ~/.config/solana/id.json
+
+# Lock vault
+qdum-vault lock --wallet YOUR_WALLET --keypair ~/.config/solana/id.json
+
+# Unlock vault (44-transaction quantum verification)
+qdum-vault unlock --wallet YOUR_WALLET --keypair ~/.config/solana/id.json
+
+# Check status
+qdum-vault status --wallet YOUR_WALLET
+
+# Check balance
+qdum-vault balance --keypair ~/.config/solana/id.json --mint MINT_ADDRESS
+
+# Transfer tokens
 qdum-vault transfer \
   --to RECIPIENT_ADDRESS \
   --amount 10000000000 \
   --keypair ~/.config/solana/id.json \
-  --mint 3V6ogu16de86nChsmC5wHMKJmCx5YdGXA6fbp3y3497n
+  --mint MINT_ADDRESS
 ```
 
-Transfer QDUM tokens to another wallet:
-- Amount in base units with 6 decimals
-- Example: 10,000 QDUM = 10000000000 base units
-- Utilizes Token-2022 transfer hooks for enhanced security
+**Note:** Amount is in base units with 6 decimals (10,000 QDUM = 10000000000 base units)
 
 ## Configuration
 
@@ -169,11 +196,19 @@ qdum-vault --program-id YOUR_PROGRAM_ID <command>
 
 ## Architecture
 
-- **Algorithm**: SPHINCS+-SHA2-128s
+- **Algorithm**: SPHINCS+-SHA2-128s (NIST FIPS 205)
 - **Public Key**: 32 bytes
 - **Private Key**: 64 bytes
 - **Signature**: 7,856 bytes
-- **Verification**: 11 transactions (chunked)
+- **Verification**: 44 transactions total:
+  - 1 signature generation
+  - 1 storage initialization
+  - 10 signature upload chunks (800 bytes each)
+  - 1 verification state init
+  - 3 FORS tree verification
+  - 28 WOTS+ layer verification (7 layers × 4 steps)
+  - 1 finalization
+- **PDA Reuse**: Saves ~0.07 SOL on subsequent unlocks
 
 ## Security
 
