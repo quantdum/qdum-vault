@@ -286,30 +286,33 @@ impl Dashboard {
                         self.mode = AppMode::Normal;
                         self.needs_clear = true;
 
-                        // Refresh vault status (create new runtime for async calls)
+                        // Refresh vault status (use block_in_place to avoid nested runtime)
                         let vault_client = &self.vault_client;
                         let wallet = self.wallet;
                         let mint = self.mint;
 
-                        if let Ok(rt) = tokio::runtime::Runtime::new() {
-                            let status_result = rt.block_on(async {
+                        // Use block_in_place + Handle::current() to safely call async from sync context
+                        let status_result = tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current().block_on(async {
                                 vault_client.get_vault_status(wallet).await
+                            })
+                        });
+
+                        if let Ok((is_locked, pda)) = status_result {
+                            self.vault_status = Some(VaultStatus {
+                                is_locked,
+                                pda: Some(pda),
                             });
+                        }
 
-                            if let Ok((is_locked, pda)) = status_result {
-                                self.vault_status = Some(VaultStatus {
-                                    is_locked,
-                                    pda: Some(pda),
-                                });
-                            }
-
-                            // Refresh balance
-                            let balance_result = rt.block_on(async {
+                        // Refresh balance
+                        let balance_result = tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current().block_on(async {
                                 vault_client.get_balance(wallet, mint).await
-                            });
-                            if let Ok(bal) = balance_result {
-                                self.balance = Some(bal);
-                            }
+                            })
+                        });
+                        if let Ok(bal) = balance_result {
+                            self.balance = Some(bal);
                         }
                     } else {
                         // Failed - show error message

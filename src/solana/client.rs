@@ -62,8 +62,10 @@ pub struct VaultClient {
 
 impl VaultClient {
     pub fn new(rpc_url: &str, program_id: Pubkey) -> Result<Self> {
-        let rpc_client = RpcClient::new_with_commitment(
+        // Use 60 second timeout for better reliability on slow networks
+        let rpc_client = RpcClient::new_with_timeout_and_commitment(
             rpc_url.to_string(),
+            Duration::from_secs(60),
             CommitmentConfig::confirmed(),
         );
 
