@@ -1658,32 +1658,36 @@ impl Dashboard {
         // Clear background
         f.render_widget(Clear, popup_area);
 
-        // Render a solid background block to ensure opacity
-        let background = Block::default()
-            .style(Style::default().bg(Color::Black));
+        // Dark themed background based on action type
+        let bg_color = match title {
+            "REGISTER VAULT" => Color::Rgb(5, 10, 20),  // Blue tint
+            "LOCK VAULT" => Color::Rgb(20, 5, 5),        // Red tint
+            _ => Color::Rgb(10, 5, 20),                  // Purple tint
+        };
+
+        let background = Block::default().style(Style::default().bg(bg_color));
         f.render_widget(background, popup_area);
 
-        // Build text from action steps
+        // Build text from action steps with better formatting
         let mut text_lines = vec![
-            Line::from(Span::styled(
-                format!("═══ {} ═══", title),
-                Style::default().fg(title_color).add_modifier(Modifier::BOLD),
-            )),
             Line::from(""),
         ];
 
         if self.action_steps.is_empty() {
-            text_lines.push(Line::from("No steps yet..."));
+            text_lines.push(Line::from(Span::styled(
+                "Initializing...",
+                Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC),
+            )));
         } else {
             for step in &self.action_steps {
                 let line = match step {
                     ActionStep::Starting => Line::from(vec![
-                        Span::styled("⏳ ", Style::default().fg(Color::Yellow)),
+                        Span::styled("⏳ ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
                         Span::styled("Preparing...", Style::default().fg(Color::White)),
                     ]),
                     ActionStep::InProgress(msg) => Line::from(vec![
-                        Span::styled("⏳ ", Style::default().fg(Color::Cyan)),
-                        Span::styled(msg.clone(), Style::default().fg(Color::White)),
+                        Span::styled("⚡ ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                        Span::styled(msg.clone(), Style::default().fg(Color::Cyan)),
                     ]),
                     ActionStep::Success(msg) => Line::from(vec![
                         Span::styled("✓ ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
@@ -1695,39 +1699,60 @@ impl Dashboard {
                     ]),
                 };
                 text_lines.push(line);
+                text_lines.push(Line::from("")); // Add spacing between steps
             }
         }
 
         // Add progress bar if we have progress data (for unlock)
         if self.progress_total > 0 && title == "UNLOCK VAULT" {
             text_lines.push(Line::from(""));
-            text_lines.push(Line::from(""));
+            text_lines.push(Line::from(Span::styled(
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                Style::default().fg(Color::DarkGray),
+            )));
 
-            let progress_label = format!("{}/{} steps - {}", self.progress_current, self.progress_total, self.progress_message);
-
+            let progress_label = format!("Progress: {}/{} steps", self.progress_current, self.progress_total);
             text_lines.push(Line::from(Span::styled(
                 progress_label,
-                Style::default().fg(Color::Cyan),
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            )));
+
+            text_lines.push(Line::from(Span::styled(
+                &self.progress_message,
+                Style::default().fg(Color::Gray),
             )));
         }
 
-        // Add instructions - always show close button since we auto-execute
+        // Add instructions with better styling
         text_lines.push(Line::from(""));
         text_lines.push(Line::from(""));
+        text_lines.push(Line::from(Span::styled(
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            Style::default().fg(Color::DarkGray),
+        )));
         text_lines.push(Line::from(vec![
-            Span::styled("[Esc]", Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::raw(" Close"),
+            Span::styled(" [Esc] ", Style::default().fg(Color::Black).bg(title_color).add_modifier(Modifier::BOLD)),
+            Span::styled(" Close", Style::default().fg(Color::White)),
         ]));
 
+        // Pulse effect for border - adjust intensity based on title color
+        let pulse = self.get_pulse_intensity();
+        let border_color = match title {
+            "REGISTER VAULT" => Color::Rgb(0, (100 + pulse / 2) as u8, (200 + pulse / 4) as u8),  // Blue pulse
+            "LOCK VAULT" => Color::Rgb((200 + pulse / 4) as u8, (50 + pulse / 5) as u8, 50),       // Red pulse
+            _ => Color::Rgb((150 + pulse / 3) as u8, (100 + pulse / 4) as u8, (200 + pulse / 4) as u8),  // Purple pulse
+        };
+
         let popup_paragraph = Paragraph::new(text_lines)
-            .style(Style::default().bg(Color::Black).fg(Color::White))
+            .style(Style::default().bg(bg_color).fg(Color::White))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(title_color).add_modifier(Modifier::BOLD))
+                    .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
+                    .border_type(ratatui::widgets::BorderType::Rounded)
                     .title(format!(" {} ", title))
                     .title_style(Style::default().fg(title_color).add_modifier(Modifier::BOLD))
-                    .style(Style::default().bg(Color::Black)),
+                    .style(Style::default().bg(bg_color)),
             )
             .alignment(Alignment::Left)
             .wrap(Wrap { trim: true });
@@ -1861,81 +1886,91 @@ impl Dashboard {
     }
 
     fn render_transfer_popup(&self, f: &mut Frame, area: Rect) {
-        let popup_area = centered_rect(60, 50, area);
+        let popup_area = centered_rect(65, 55, area);
 
         // Clear background
         f.render_widget(Clear, popup_area);
 
-        // Background block
-        let background = Block::default().style(Style::default().bg(Color::Black));
+        // Dark themed background with green tint for transfer
+        let bg_color = Color::Rgb(5, 15, 10);
+        let background = Block::default().style(Style::default().bg(bg_color));
         f.render_widget(background, popup_area);
 
         let mut text_lines = vec![
-            Line::from(Span::styled(
-                "═══ TRANSFER TOKENS ═══",
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-            )),
             Line::from(""),
         ];
 
-        // Show current balance
+        // Show current balance with better styling
         if let Some(balance) = self.balance {
             let balance_qdum = balance as f64 / 1_000_000.0;
             text_lines.push(Line::from(vec![
-                Span::styled("Your Balance: ", Style::default().fg(Color::Gray)),
-                Span::styled(format!("{:.6} QDUM", balance_qdum), Style::default().fg(Color::Green)),
+                Span::styled("💰 Your Balance: ", Style::default().fg(Color::Gray)),
+                Span::styled(format!("{:.6} QDUM", balance_qdum), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
             ]));
+            text_lines.push(Line::from(""));
+            text_lines.push(Line::from(Span::styled(
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                Style::default().fg(Color::DarkGray),
+            )));
             text_lines.push(Line::from(""));
         }
 
-        // Recipient field
+        // Recipient field with better visual hierarchy
         let recipient_style = if self.transfer_focused_field == TransferInputField::Recipient {
             Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::White)
         };
 
-        text_lines.push(Line::from(vec![
-            Span::styled("Recipient: ", Style::default().fg(Color::Cyan)),
-            Span::styled(
-                if self.transfer_recipient.is_empty() {
-                    "[Enter wallet address]"
-                } else {
-                    &self.transfer_recipient
-                },
-                recipient_style,
-            ),
-        ]));
+        text_lines.push(Line::from(Span::styled(
+            "Recipient Address:",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )));
+
+        let recipient_display = if self.transfer_recipient.is_empty() {
+            "  [Enter wallet address...]".to_string()
+        } else {
+            format!("  {}", self.transfer_recipient)
+        };
+
+        text_lines.push(Line::from(Span::styled(
+            recipient_display,
+            recipient_style,
+        )));
 
         if self.transfer_focused_field == TransferInputField::Recipient {
-            text_lines.push(Line::from(Span::styled("▂", Style::default().fg(Color::Yellow))));
+            text_lines.push(Line::from(Span::styled("  ▂▂▂▂▂▂▂▂▂▂▂", Style::default().fg(Color::Yellow))));
         } else {
             text_lines.push(Line::from(""));
         }
 
         text_lines.push(Line::from(""));
 
-        // Amount field
+        // Amount field with better visual hierarchy
         let amount_style = if self.transfer_focused_field == TransferInputField::Amount {
             Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::White)
         };
 
-        text_lines.push(Line::from(vec![
-            Span::styled("Amount (QDUM): ", Style::default().fg(Color::Cyan)),
-            Span::styled(
-                if self.transfer_amount.is_empty() {
-                    "[0.0]"
-                } else {
-                    &self.transfer_amount
-                },
-                amount_style,
-            ),
-        ]));
+        text_lines.push(Line::from(Span::styled(
+            "Amount (QDUM):",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )));
+
+        let amount_display = if self.transfer_amount.is_empty() {
+            "  [0.0]".to_string()
+        } else {
+            format!("  {}", self.transfer_amount)
+        };
+
+        text_lines.push(Line::from(Span::styled(
+            amount_display,
+            amount_style,
+        )));
 
         if self.transfer_focused_field == TransferInputField::Amount {
-            text_lines.push(Line::from(Span::styled("▂", Style::default().fg(Color::Yellow))));
+            text_lines.push(Line::from(Span::styled("  ▂▂▂▂▂▂▂▂▂▂▂", Style::default().fg(Color::Yellow))));
         } else {
             text_lines.push(Line::from(""));
         }
@@ -1943,23 +1978,32 @@ impl Dashboard {
         text_lines.push(Line::from(""));
         text_lines.push(Line::from(""));
 
-        // Instructions
+        // Instructions with better styling
+        text_lines.push(Line::from(Span::styled(
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            Style::default().fg(Color::DarkGray),
+        )));
         text_lines.push(Line::from(vec![
-            Span::styled("[Tab/↑↓]", Style::default().fg(Color::Black).bg(Color::Blue).add_modifier(Modifier::BOLD)),
-            Span::raw(" Switch field  "),
-            Span::styled("[Enter]", Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::raw(" Send  "),
-            Span::styled("[Esc]", Style::default().fg(Color::Black).bg(Color::Red).add_modifier(Modifier::BOLD)),
-            Span::raw(" Cancel"),
+            Span::styled(" [Tab/↑↓] ", Style::default().fg(Color::Black).bg(Color::Blue).add_modifier(Modifier::BOLD)),
+            Span::styled(" Switch   ", Style::default().fg(Color::White)),
+            Span::styled(" [Enter] ", Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled(" Send   ", Style::default().fg(Color::White)),
+            Span::styled(" [Esc] ", Style::default().fg(Color::Black).bg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled(" Cancel", Style::default().fg(Color::White)),
         ]));
 
+        // Pulse effect for border
+        let pulse = self.get_pulse_intensity();
+        let border_color = Color::Rgb(0, (150 + pulse / 3) as u8, (100 + pulse / 4) as u8);
+
         let popup_paragraph = Paragraph::new(text_lines)
-            .style(Style::default().bg(Color::Black).fg(Color::White))
+            .style(Style::default().bg(bg_color).fg(Color::White))
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-                    .title(" Transfer QDUM Tokens ")
+                    .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
+                    .border_type(ratatui::widgets::BorderType::Rounded)
+                    .title(" TRANSFER QDUM TOKENS ")
                     .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
                     .style(Style::default().bg(Color::Black)),
             )
