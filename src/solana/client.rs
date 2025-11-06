@@ -4,7 +4,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
-    instruction::{AccountMeta, Instruction},
+    instruction::Instruction,
     pubkey::Pubkey,
     signature::{Keypair, Signer},
     transaction::Transaction,
@@ -231,6 +231,30 @@ impl VaultClient {
         sphincs_privkey: &[u8; 64],
         mut progress_callback: Option<Box<dyn FnMut(usize, usize, String) + Send>>,
     ) -> Result<()> {
+        // Wrap entire function to catch and log errors
+        let result = self.unlock_vault_inner(wallet, keypair_path, sphincs_privkey, progress_callback).await;
+
+        match &result {
+            Ok(_) => {
+                let _ = std::fs::write("/tmp/qdum-unlock-result.log", "SUCCESS");
+            }
+            Err(e) => {
+                let error_msg = format!("UNLOCK FAILED: {:?}", e);
+                let _ = std::fs::write("/tmp/qdum-unlock-result.log", &error_msg);
+                eprintln!("{}", error_msg);
+            }
+        }
+
+        result
+    }
+
+    async fn unlock_vault_inner(
+        &self,
+        wallet: Pubkey,
+        keypair_path: &str,
+        sphincs_privkey: &[u8; 64],
+        mut progress_callback: Option<Box<dyn FnMut(usize, usize, String) + Send>>,
+    ) -> Result<()> {
         println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_magenta());
         println!("{}", "║                                                           ║".on_black().bright_magenta());
         println!("{}", "║   ⚛️  QUANTUM VAULT UNLOCK SEQUENCE INITIATED  ⚛️        ║".on_black().bright_cyan().bold());
@@ -299,11 +323,9 @@ impl VaultClient {
         spinner.finish_with_message(format!("{} {} bytes", "✓ Signature generated:".bright_green(), SPHINCS_SIGNATURE_SIZE.to_string().bright_yellow()));
         println!();
 
-        // Use fixed identifier so we can clean up old PDAs before creating new ones
+        // Use fixed identifier to reuse PDAs across unlocks (saves ~0.07 SOL rent after first unlock)
+        // The on-chain program supports PDA reinitialization with init_if_needed constraint
         let unique_identifier = "current".to_string();
-
-        // STEP 0: Close old PDAs if they exist (refund rent like quantdum-token does)
-        self.close_sphincs_pdas(&keypair, &unique_identifier).await.ok(); // Ignore error if PDAs don't exist
 
         // Derive signature storage PDA
         let (signature_storage, _) = Pubkey::find_program_address(
@@ -330,12 +352,14 @@ impl VaultClient {
                 .progress_chars("━━╸")
         );
 
-        // Step 1: Initialize signature storage (always fresh with unique identifier)
+        // Step 1: (Re)initialize signature storage to reset state for new unlock
         current_step += 1;
         if let Some(ref mut cb) = progress_callback {
             cb(current_step, total_steps, "Initializing signature storage...".to_string());
         }
         pb_phase1.set_message(format!("{}", "Initializing storage...".bright_white()));
+
+        // Always reinitialize to reset state (program allows reinit of existing PDAs)
         self.initialize_sphincs_storage(&keypair, &signature_storage, &unique_identifier, &sphincs_pubkey, challenge).await?;
         pb_phase1.inc(1);
 
@@ -376,12 +400,14 @@ impl VaultClient {
                 .progress_chars("━━╸")
         );
 
-        // Step 0: Initialize verification state
+        // Step 0: (Re)initialize verification state to reset for new unlock
         current_step += 1;
         if let Some(ref mut cb) = progress_callback {
             cb(current_step, total_steps, "Initializing verification state...".to_string());
         }
         pb_phase2.set_message(format!("{}", "Initializing verification...".bright_white()));
+
+        // Always reinitialize to reset state (program allows reinit of existing PDAs)
         self.sphincs_verify_step0_init(
             &keypair,
             &verification_state,
@@ -558,8 +584,19 @@ impl VaultClient {
             recent_blockhash,
         );
 
-        self.rpc_client.send_and_confirm_transaction(&transaction)?;
-        Ok(())
+        // Send transaction and capture detailed error
+        match self.rpc_client.send_and_confirm_transaction(&transaction) {
+            Ok(sig) => {
+                let _ = std::fs::write("/tmp/qdum-init-sig-success.log", format!("Signature: {}\nIdentifier: {}", sig, identifier));
+                Ok(())
+            }
+            Err(e) => {
+                let error_msg = format!("Init signature storage error:\nIdentifier: {}\nSignature Storage PDA: {}\nError: {:?}", identifier, signature_storage, e);
+                let _ = std::fs::write("/tmp/qdum-init-sig-error.log", &error_msg);
+                eprintln!("UNLOCK ERROR: {}", error_msg);
+                Err(e.into())
+            }
+        }
     }
 
     /// Upload a chunk of SPHINCS+ signature
@@ -1316,69 +1353,4 @@ impl VaultClient {
         Ok(())
     }
 
-    /// Close old SPHINCS PDAs to refund rent (like quantdum-token does)
-    async fn close_sphincs_pdas(&self, keypair: &Keypair, unique_identifier: &str) -> Result<()> {
-        // Derive the PDAs we want to close
-        let (signature_storage, _) = Pubkey::find_program_address(
-            &[b"sphincs_sig", keypair.pubkey().as_ref(), unique_identifier.as_bytes()],
-            &self.program_id,
-        );
-        let (verification_state, _) = Pubkey::find_program_address(
-            &[b"sphincs_verify", keypair.pubkey().as_ref(), unique_identifier.as_bytes()],
-            &self.program_id,
-        );
-
-        // Check if accounts exist before trying to close
-        if self.rpc_client.get_account(&signature_storage).is_ok() {
-            // Close signature storage using discriminator 'global:close_verification_state'
-            let close_discriminator: [u8; 8] = [
-                0x20, 0x4f, 0x6f, 0xd5, 0x4e, 0x73, 0xa4, 0x9e
-            ]; // sha256('global:close_verification_state')[..8]
-
-            let close_ix = Instruction {
-                program_id: self.program_id,
-                accounts: vec![
-                    AccountMeta::new(signature_storage, false),
-                    AccountMeta::new(keypair.pubkey(), true),
-                ],
-                data: close_discriminator.to_vec(),
-            };
-
-            let recent_blockhash = self.rpc_client.get_latest_blockhash()?;
-            let transaction = Transaction::new_signed_with_payer(
-                &[close_ix],
-                Some(&keypair.pubkey()),
-                &[keypair],
-                recent_blockhash,
-            );
-            self.rpc_client.send_and_confirm_transaction(&transaction)?;
-        }
-
-        // Close verification state if it exists
-        if self.rpc_client.get_account(&verification_state).is_ok() {
-            let close_discriminator: [u8; 8] = [
-                0x20, 0x4f, 0x6f, 0xd5, 0x4e, 0x73, 0xa4, 0x9e
-            ];
-
-            let close_ix = Instruction {
-                program_id: self.program_id,
-                accounts: vec![
-                    AccountMeta::new(verification_state, false),
-                    AccountMeta::new(keypair.pubkey(), true),
-                ],
-                data: close_discriminator.to_vec(),
-            };
-
-            let recent_blockhash = self.rpc_client.get_latest_blockhash()?;
-            let transaction = Transaction::new_signed_with_payer(
-                &[close_ix],
-                Some(&keypair.pubkey()),
-                &[keypair],
-                recent_blockhash,
-            );
-            self.rpc_client.send_and_confirm_transaction(&transaction)?;
-        }
-
-        Ok(())
-    }
 }
