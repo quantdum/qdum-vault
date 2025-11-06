@@ -10,7 +10,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, BorderType, Clear, List, ListItem, Paragraph, Row, Table, Wrap},
     Frame, Terminal,
 };
 use solana_sdk::pubkey::Pubkey;
@@ -1324,17 +1324,17 @@ impl Dashboard {
         // Much more dramatic status colors with wider range
         let (status_color, status_bg, status_icon) = if let Some(ref status) = self.vault_status {
             if status.is_locked {
-                // LOCKED: Red theme from Catppuccin
+                // LOCKED: Red neon cyberpunk theme
                 let icon = if bright { "▓▓▓ [X] LOCKED ▓▓▓" } else { "░░░ [X] LOCKED ░░░" };
-                (Theme::locked(), Theme::MAROON, icon)
+                (Theme::locked(), Theme::RED, icon)
             } else {
-                // UNLOCKED: Green theme from Catppuccin
+                // UNLOCKED: Green neon cyberpunk theme
                 let icon = if bright { "▓▓▓ [O] UNLOCKED ▓▓▓" } else { "░░░ [O] UNLOCKED ░░░" };
-                (Theme::unlocked(), Theme::TEAL, icon)
+                (Theme::unlocked(), Theme::GREEN, icon)
             }
         } else {
             let icon = if bright { "▓▓▓ [~] LOADING ▓▓▓" } else { "░░░ [~] LOADING ░░░" };
-            (Theme::warning(), Theme::PEACH, icon)
+            (Theme::warning(), Theme::YELLOW, icon)
         };
 
         let balance_text = if let Some(balance) = self.balance {
@@ -1376,20 +1376,20 @@ impl Dashboard {
             ])),
             ListItem::new(Line::from("")),
             ListItem::new(Line::from(vec![
-                Span::styled(format!("{} ", Icons::ALGORITHM), Style::default().fg(Theme::MAUVE)),
-                Span::styled("ALGORITHM: ", Style::default().fg(Theme::PINK)),
-                Span::styled("SPHINCS+-SHA2-128s", Style::default().fg(Theme::SAPPHIRE)),
+                Span::styled(format!("{} ", Icons::ALGORITHM), Style::default().fg(Theme::PURPLE)),
+                Span::styled("ALGORITHM: ", Style::default().fg(Theme::CYAN_NEON)),
+                Span::styled("SPHINCS+-SHA2-128s", Style::default().fg(Theme::TEXT)),
             ])),
             ListItem::new(Line::from(vec![
-                Span::styled(format!("{} ", Icons::SECURITY), Style::default().fg(Theme::MAUVE)),
-                Span::styled("SECURITY: ", Style::default().fg(Theme::PINK)),
-                Span::styled("NIST FIPS 205", Style::default().fg(Theme::SAPPHIRE)),
+                Span::styled(format!("{} ", Icons::SECURITY), Style::default().fg(Theme::PURPLE)),
+                Span::styled("SECURITY: ", Style::default().fg(Theme::CYAN_NEON)),
+                Span::styled("NIST FIPS 205", Style::default().fg(Theme::TEXT)),
             ])),
             ListItem::new(Line::from("")),
             ListItem::new(Line::from(vec![
-                Span::styled(format!("{} ", Icons::NETWORK), Style::default().fg(Theme::SKY)),
-                Span::styled("NETWORK: ", Style::default().fg(Theme::PINK)),
-                Span::styled("Solana Devnet", Style::default().fg(Theme::GREEN)),
+                Span::styled(format!("{} ", Icons::NETWORK), Style::default().fg(Theme::BLUE)),
+                Span::styled("NETWORK: ", Style::default().fg(Theme::CYAN_NEON)),
+                Span::styled("Solana Devnet", Style::default().fg(Theme::TEXT)),
             ])),
         ];
 
@@ -1398,13 +1398,13 @@ impl Dashboard {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Theme::quantum()))  // Quantum purple border
-                    .border_type(ratatui::widgets::BorderType::Rounded)
+                    .border_type(BorderType::Rounded)
                     .title(" [≡] VAULT STATUS ")
                     .title_style(Style::default()
-                        .fg(Theme::SAPPHIRE)  // Sapphire cyan title
+                        .fg(Theme::CYAN_NEON)  // Neon cyan title
                         .add_modifier(Modifier::BOLD)),
             )
-            .style(Style::default().bg(Theme::BASE));
+            .style(Style::default().bg(Theme::PANEL_BG));
 
         f.render_widget(list, area);
     }

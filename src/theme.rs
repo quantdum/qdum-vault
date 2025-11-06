@@ -1,48 +1,53 @@
-// Catppuccin Mocha inspired color theme for qdum-vault
-// Provides a cohesive, professional dark theme with semantic color meanings
+// Cyberpunk-inspired color theme for qdum-vault
+// Dark backgrounds with neon accents for a futuristic crypto aesthetic
 
 use ratatui::style::Color;
 
 pub struct Theme;
 
 impl Theme {
-    // Base colors - Background layers
-    pub const BASE: Color = Color::Rgb(30, 30, 46);         // Main background
-    pub const MANTLE: Color = Color::Rgb(24, 24, 37);       // Slightly darker
-    pub const CRUST: Color = Color::Rgb(17, 17, 27);        // Darkest background
+    // Base colors - Dark cyberpunk backgrounds
+    pub const BASE: Color = Color::Rgb(10, 10, 20);         // Very dark blue-black
+    pub const MANTLE: Color = Color::Rgb(15, 15, 25);       // Slightly lighter
+    pub const CRUST: Color = Color::Rgb(5, 5, 15);          // Darkest background
+    pub const PANEL_BG: Color = Color::Rgb(12, 12, 22);     // Panel background
 
-    // Surface layers - For panels and cards
-    pub const SURFACE0: Color = Color::Rgb(49, 50, 68);     // Elevated surface
-    pub const SURFACE1: Color = Color::Rgb(69, 71, 90);     // More elevated
-    pub const SURFACE2: Color = Color::Rgb(88, 91, 112);    // Highest elevation
+    // Surface layers - For elevated elements
+    pub const SURFACE0: Color = Color::Rgb(20, 20, 35);     // Elevated surface
+    pub const SURFACE1: Color = Color::Rgb(25, 25, 40);     // More elevated
+    pub const SURFACE2: Color = Color::Rgb(30, 30, 45);     // Highest elevation
 
-    // Text colors - Semantic hierarchy
-    pub const TEXT: Color = Color::Rgb(205, 214, 244);      // Primary text
-    pub const SUBTEXT1: Color = Color::Rgb(186, 194, 222);  // Secondary text
-    pub const SUBTEXT0: Color = Color::Rgb(166, 173, 200);  // Tertiary text
-    pub const OVERLAY2: Color = Color::Rgb(147, 153, 178);  // Muted text
-    pub const OVERLAY1: Color = Color::Rgb(127, 132, 156);  // More muted
+    // Text colors - High contrast for readability
+    pub const TEXT: Color = Color::Rgb(255, 255, 255);      // Pure white primary text
+    pub const SUBTEXT1: Color = Color::Rgb(220, 220, 230);  // Light gray secondary
+    pub const SUBTEXT0: Color = Color::Rgb(180, 180, 200);  // Medium gray tertiary
+    pub const OVERLAY2: Color = Color::Rgb(140, 140, 160);  // Muted text
+    pub const OVERLAY1: Color = Color::Rgb(100, 100, 120);  // Very muted
+    pub const DIM: Color = Color::Rgb(60, 60, 80);          // Dim/disabled text
 
-    // Accent colors - Semantic meanings
-    pub const BLUE: Color = Color::Rgb(137, 180, 250);      // Info, downloads, data flow
-    pub const SAPPHIRE: Color = Color::Rgb(116, 199, 236);  // Links, interactive
-    pub const SKY: Color = Color::Rgb(137, 220, 235);       // Highlights
-    pub const TEAL: Color = Color::Rgb(148, 226, 213);      // Success accent
-    pub const GREEN: Color = Color::Rgb(166, 227, 161);     // Success, uploads, positive
-    pub const YELLOW: Color = Color::Rgb(249, 226, 175);    // Warning, selection, focus
-    pub const PEACH: Color = Color::Rgb(250, 179, 135);     // Emphasis, important
-    pub const MAROON: Color = Color::Rgb(238, 153, 160);    // Error accent
-    pub const RED: Color = Color::Rgb(243, 139, 168);       // Error, critical, locked
-    pub const MAUVE: Color = Color::Rgb(203, 166, 247);     // Active, quantum theme
-    pub const PINK: Color = Color::Rgb(245, 194, 231);      // Special, decorative
-    pub const FLAMINGO: Color = Color::Rgb(242, 205, 205);  // Soft accent
-    pub const ROSEWATER: Color = Color::Rgb(245, 224, 220); // Subtle accent
+    // Neon accent colors - Cyberpunk aesthetic
+    pub const CYAN_NEON: Color = Color::Rgb(0, 255, 255);   // Bright cyan - headers
+    pub const BLUE_NEON: Color = Color::Rgb(0, 150, 255);   // Blue - info
+    pub const PURPLE_NEON: Color = Color::Rgb(180, 0, 255); // Purple - quantum/crypto
+    pub const PINK_NEON: Color = Color::Rgb(255, 0, 180);   // Pink - special
+    pub const GREEN_NEON: Color = Color::Rgb(0, 255, 150);  // Green - success/unlocked
+    pub const RED_NEON: Color = Color::Rgb(255, 0, 100);    // Red - error/locked
+    pub const YELLOW_NEON: Color = Color::Rgb(255, 255, 0); // Yellow - warning/selection
+    pub const ORANGE_NEON: Color = Color::Rgb(255, 150, 0); // Orange - emphasis
+
+    // Muted versions for less aggressive use
+    pub const CYAN: Color = Color::Rgb(0, 200, 200);        // Muted cyan
+    pub const BLUE: Color = Color::Rgb(80, 150, 255);       // Muted blue
+    pub const PURPLE: Color = Color::Rgb(150, 80, 255);     // Muted purple
+    pub const GREEN: Color = Color::Rgb(80, 255, 150);      // Muted green
+    pub const RED: Color = Color::Rgb(255, 80, 120);        // Muted red
+    pub const YELLOW: Color = Color::Rgb(255, 220, 80);     // Muted yellow
 
     // Semantic color functions
 
     /// Border color for active/focused panels
     pub const fn active_border() -> Color {
-        Self::MAUVE
+        Self::CYAN_NEON
     }
 
     /// Border color for inactive panels
@@ -50,48 +55,58 @@ impl Theme {
         Self::SURFACE1
     }
 
+    /// Color for table/section headers
+    pub const fn header() -> Color {
+        Self::CYAN_NEON
+    }
+
     /// Color for success states (unlocked, completed)
     pub const fn success() -> Color {
-        Self::GREEN
+        Self::GREEN_NEON
     }
 
     /// Color for error states
     pub const fn error() -> Color {
-        Self::RED
+        Self::RED_NEON
     }
 
     /// Color for warning states
     pub const fn warning() -> Color {
-        Self::YELLOW
+        Self::YELLOW_NEON
     }
 
     /// Color for info/neutral states
     pub const fn info() -> Color {
-        Self::BLUE
+        Self::BLUE_NEON
     }
 
     /// Color for quantum/crypto operations
     pub const fn quantum() -> Color {
-        Self::MAUVE
+        Self::PURPLE_NEON
     }
 
     /// Color for locked state
     pub const fn locked() -> Color {
-        Self::RED
+        Self::RED_NEON
     }
 
     /// Color for unlocked state
     pub const fn unlocked() -> Color {
-        Self::GREEN
+        Self::GREEN_NEON
     }
 
     /// Color for selected/focused input
     pub const fn selection() -> Color {
-        Self::YELLOW
+        Self::YELLOW_NEON
     }
 
     /// Color for progress/in-progress operations
     pub const fn progress() -> Color {
-        Self::SAPPHIRE
+        Self::CYAN
+    }
+
+    /// Dim/muted border for sections
+    pub const fn section_border() -> Color {
+        Self::SURFACE2
     }
 }
