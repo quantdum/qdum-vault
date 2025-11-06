@@ -1197,80 +1197,68 @@ impl Dashboard {
             .style(Style::default().bg(Color::Rgb(25, 10, 50)));
         f.render_widget(header_paragraph, chunks[0]);
 
-        // Wallet info with quantum gradient background
-        let mut wallet_text = vec![
-            Line::from(vec![
-                Span::styled(format!("{} ", Icons::WALLET), Style::default().fg(Color::Rgb(0, 255, 200))),
-                Span::styled("WALLET: ", Style::default().fg(Color::Rgb(255, 0, 200))),  // Magenta
-                Span::styled(
-                    self.wallet.to_string(),
-                    Style::default()
-                        .fg(Color::Rgb(0, 255, 255))  // Bright cyan
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("  [C] COPY", Style::default().fg(Color::Rgb(150, 150, 255))),
+        // Account info with clean table layout
+        let mut account_rows = vec![
+            // Wallet address row
+            Row::new(vec![
+                Line::from(Span::styled("WALLET", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
+                Line::from(vec![
+                    Span::styled(self.wallet.to_string(), Style::default().fg(Theme::TEXT).add_modifier(Modifier::BOLD)),
+                    Span::styled("  [C] COPY", Style::default().fg(Theme::SUBTEXT0)),
+                ]),
             ]),
-            Line::from(""),
         ];
 
-        // Add PQ Account info if available
+        // Add PQ Account and State rows if available
         if let Some(ref status) = self.vault_status {
             if let Some(pda) = status.pda {
-                let state_text = if status.is_locked { "LOCKED" } else { "UNLOCKED" };
-                let state_color = if status.is_locked {
-                    Color::Rgb(255, 100, 100)  // Red for locked
-                } else {
-                    Color::Rgb(100, 255, 100)  // Green for unlocked
-                };
+                let state_text = if status.is_locked { "🔒 LOCKED" } else { "🔓 UNLOCKED" };
+                let state_color = if status.is_locked { Theme::RED_NEON } else { Theme::GREEN_NEON };
 
-                wallet_text.push(Line::from(vec![
-                    Span::styled(format!("{} ", Icons::QUANTUM), Style::default().fg(Color::Rgb(150, 0, 255))),
-                    Span::styled("PQ ACCOUNT: ", Style::default().fg(Color::Rgb(255, 0, 200))),
-                    Span::styled(
-                        pda.to_string(),
-                        Style::default()
-                            .fg(Color::Rgb(200, 150, 255))  // Light purple
-                            .add_modifier(Modifier::BOLD),
-                    ),
+                account_rows.push(Row::new(vec![
+                    Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))),
+                    Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))),
                 ]));
-                wallet_text.push(Line::from(vec![
-                    Span::styled(format!("{} ", Icons::SECURITY), Style::default().fg(Color::Rgb(255, 200, 0))),
-                    Span::styled("STATE: ", Style::default().fg(Color::Rgb(255, 0, 200))),
-                    Span::styled(
-                        state_text,
-                        Style::default()
-                            .fg(state_color)
-                            .add_modifier(Modifier::BOLD),
-                    ),
+
+                account_rows.push(Row::new(vec![
+                    Line::from(Span::styled("PQ ACCOUNT", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
+                    Line::from(Span::styled(pda.to_string(), Style::default().fg(Theme::PURPLE).add_modifier(Modifier::BOLD))),
+                ]));
+
+                account_rows.push(Row::new(vec![
+                    Line::from(Span::styled("STATE", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
+                    Line::from(Span::styled(state_text, Style::default().fg(state_color).add_modifier(Modifier::BOLD))),
                 ]));
             } else {
                 // PDA not available - vault not registered
-                wallet_text.push(Line::from(vec![
-                    Span::styled(format!("{} ", Icons::QUANTUM), Style::default().fg(Color::Rgb(150, 0, 255))),
-                    Span::styled("PQ ACCOUNT: ", Style::default().fg(Color::Rgb(255, 0, 200))),
-                    Span::styled(
-                        "NOT REGISTERED - Use [R] to Register",
-                        Style::default()
-                            .fg(Color::Rgb(255, 150, 0))  // Orange warning
-                            .add_modifier(Modifier::BOLD),
-                    ),
+                account_rows.push(Row::new(vec![
+                    Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))),
+                    Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))),
+                ]));
+
+                account_rows.push(Row::new(vec![
+                    Line::from(Span::styled("PQ ACCOUNT", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
+                    Line::from(Span::styled("NOT REGISTERED - Use [R]", Style::default().fg(Theme::ORANGE_NEON).add_modifier(Modifier::BOLD))),
                 ]));
             }
         }
+
+        let account_widths = [Constraint::Length(20), Constraint::Min(40)];
+
         let pulse_wallet = self.get_pulse_intensity();
-        let wallet_paragraph = Paragraph::new(wallet_text)
+        let account_table = Table::new(account_rows, account_widths)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Rgb(150, 0, pulse_wallet)))  // Pulsing purple border
+                    .border_style(Style::default().fg(Color::Rgb(150, 0, pulse_wallet)))
+                    .border_type(BorderType::Rounded)
                     .title(format!(" {} ACCOUNT INFO ", Icons::INFO))
-                    .title_style(Style::default()
-                        .fg(Color::Rgb(0, 255, 200))  // Static cyan title
-                        .add_modifier(Modifier::BOLD)),
+                    .title_style(Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD)),
             )
-            .style(Style::default().bg(Color::Rgb(25, 10, 50)))  // Purple bg
-            .wrap(Wrap { trim: true });
-        f.render_widget(wallet_paragraph, chunks[1]);
+            .style(Style::default().bg(Theme::PANEL_BG))
+            .column_spacing(2);
+
+        f.render_widget(account_table, chunks[1]);
 
         // Main content area - split into two columns
         let main_chunks = Layout::default()
@@ -1308,195 +1296,123 @@ impl Dashboard {
     }
 
     fn render_status_panel(&self, f: &mut Frame, area: Rect) {
-        let status_text = if let Some(ref status) = self.vault_status {
+        // Determine vault status
+        let (status_text, status_color) = if let Some(ref status) = self.vault_status {
             if status.is_locked {
-                format!("{} LOCKED", Icons::LOCKED_STATUS)
+                ("🔒 LOCKED", Theme::RED_NEON)
             } else {
-                format!("{} UNLOCKED", Icons::UNLOCKED_STATUS)
+                ("🔓 UNLOCKED", Theme::GREEN_NEON)
             }
         } else {
-            format!("{} Loading...", Icons::LOADING)
+            ("⏳ LOADING", Theme::YELLOW_NEON)
         };
 
-        let pulse = self.get_pulse_intensity();
-        let bright = self.get_pulse_color_bright();
-
-        // Much more dramatic status colors with wider range
-        let (status_color, status_bg, status_icon) = if let Some(ref status) = self.vault_status {
-            if status.is_locked {
-                // LOCKED: Red neon cyberpunk theme
-                let icon = if bright { "▓▓▓ [X] LOCKED ▓▓▓" } else { "░░░ [X] LOCKED ░░░" };
-                (Theme::locked(), Theme::RED, icon)
-            } else {
-                // UNLOCKED: Green neon cyberpunk theme
-                let icon = if bright { "▓▓▓ [O] UNLOCKED ▓▓▓" } else { "░░░ [O] UNLOCKED ░░░" };
-                (Theme::unlocked(), Theme::GREEN, icon)
-            }
-        } else {
-            let icon = if bright { "▓▓▓ [~] LOADING ▓▓▓" } else { "░░░ [~] LOADING ░░░" };
-            (Theme::warning(), Theme::YELLOW, icon)
-        };
-
+        // Format balance
         let balance_text = if let Some(balance) = self.balance {
-            // Convert from base units (6 decimals) to human-readable QDUM
             let balance_qdum = balance as f64 / 1_000_000.0;
             format!("{:.6} QDUM", balance_qdum)
         } else {
             "Loading...".to_string()
         };
 
-        let items = vec![
-            // LARGE ANIMATED STATUS DISPLAY
-            ListItem::new(Line::from("")),
-            ListItem::new(Line::from(vec![
-                Span::styled("  ", Style::default()),
-                Span::styled(
-                    status_icon,
-                    Style::default()
-                        .fg(status_color)
-                        .bg(status_bg)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ])),
-            ListItem::new(Line::from("")),
-            // LARGE ANIMATED BALANCE DISPLAY - Solid fill with inverted text
-            ListItem::new(Line::from(vec![
-                Span::styled("  ┌────────────────────────┐", Style::default().fg(Theme::YELLOW)),
-            ])),
-            ListItem::new(Line::from(vec![
-                Span::styled("  │", Style::default().fg(Theme::YELLOW)),
-                Span::styled(format!("{:<24}", balance_text), Style::default()
-                    .fg(Theme::BASE)  // Dark background for text
-                    .bg(Theme::YELLOW)  // Yellow solid fill
-                    .add_modifier(Modifier::BOLD)),
-                Span::styled("│", Style::default().fg(Theme::YELLOW)),
-            ])),
-            ListItem::new(Line::from(vec![
-                Span::styled("  └────────────────────────┘", Style::default().fg(Theme::YELLOW)),
-            ])),
-            ListItem::new(Line::from("")),
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("{} ", Icons::ALGORITHM), Style::default().fg(Theme::PURPLE)),
-                Span::styled("ALGORITHM: ", Style::default().fg(Theme::CYAN_NEON)),
-                Span::styled("SPHINCS+-SHA2-128s", Style::default().fg(Theme::TEXT)),
-            ])),
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("{} ", Icons::SECURITY), Style::default().fg(Theme::PURPLE)),
-                Span::styled("SECURITY: ", Style::default().fg(Theme::CYAN_NEON)),
-                Span::styled("NIST FIPS 205", Style::default().fg(Theme::TEXT)),
-            ])),
-            ListItem::new(Line::from("")),
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("{} ", Icons::NETWORK), Style::default().fg(Theme::BLUE)),
-                Span::styled("NETWORK: ", Style::default().fg(Theme::CYAN_NEON)),
-                Span::styled("Solana Devnet", Style::default().fg(Theme::TEXT)),
-            ])),
+        // Build table rows with clean data organization
+        let rows = vec![
+            Row::new(vec![
+                Line::from(Span::styled("STATUS", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
+                Line::from(Span::styled(status_text, Style::default().fg(status_color).add_modifier(Modifier::BOLD))),
+            ]),
+            Row::new(vec![
+                Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))),
+                Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))),
+            ]),
+            Row::new(vec![
+                Line::from(Span::styled("BALANCE", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
+                Line::from(Span::styled(balance_text, Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD))),
+            ]),
+            Row::new(vec![
+                Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))),
+                Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))),
+            ]),
+            Row::new(vec![
+                Line::from(Span::styled("ALGORITHM", Style::default().fg(Theme::CYAN_NEON))),
+                Line::from(Span::styled("SPHINCS+-SHA2-128s", Style::default().fg(Theme::TEXT))),
+            ]),
+            Row::new(vec![
+                Line::from(Span::styled("SECURITY", Style::default().fg(Theme::CYAN_NEON))),
+                Line::from(Span::styled("NIST FIPS 205", Style::default().fg(Theme::TEXT))),
+            ]),
+            Row::new(vec![
+                Line::from(Span::styled("NETWORK", Style::default().fg(Theme::CYAN_NEON))),
+                Line::from(Span::styled("Solana Devnet", Style::default().fg(Theme::TEXT))),
+            ]),
         ];
 
-        let list = List::new(items)
+        let widths = [Constraint::Length(20), Constraint::Min(30)];
+
+        let table = Table::new(rows, widths)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Theme::quantum()))  // Quantum purple border
+                    .border_style(Style::default().fg(Theme::quantum()))
                     .border_type(BorderType::Rounded)
-                    .title(" [≡] VAULT STATUS ")
-                    .title_style(Style::default()
-                        .fg(Theme::CYAN_NEON)  // Neon cyan title
-                        .add_modifier(Modifier::BOLD)),
+                    .title(" VAULT STATUS ")
+                    .title_style(Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD)),
             )
-            .style(Style::default().bg(Theme::PANEL_BG));
+            .style(Style::default().bg(Theme::PANEL_BG))
+            .column_spacing(2);
 
-        f.render_widget(list, area);
+        f.render_widget(table, area);
     }
 
     fn render_actions_panel(&self, f: &mut Frame, area: Rect) {
+        // Define actions with clean data structure
         let actions = vec![
-            (format!("{} REGISTER", Icons::REGISTER), "G/1", "Initialize quantum account", Color::Rgb(0, 255, 100)),
-            (format!("{} LOCK", Icons::LOCK), "L", "Secure vault with PQ crypto", Color::Rgb(255, 0, 100)),
-            (format!("{} UNLOCK", Icons::UNLOCK), "U", "Verify SPHINCS+ signature", Color::Rgb(255, 255, 0)),
-            (format!("{} TRANSFER", Icons::TRANSFER), "T/2", "Execute quantum-safe transfer", Color::Rgb(0, 200, 255)),
+            ("🔐 REGISTER", "[R]", "Initialize PQ account", Theme::GREEN),
+            ("🔒 LOCK", "[L]", "Secure vault", Theme::RED),
+            ("🔓 UNLOCK", "[U]", "Verify signature", Theme::YELLOW),
+            ("💸 TRANSFER", "[T]", "Send tokens", Theme::CYAN),
         ];
 
-        let items: Vec<ListItem> = actions
+        // Build table rows
+        let rows: Vec<Row> = actions
             .iter()
-            .enumerate()
-            .map(|(idx, (name, key, desc, color))| {
-                let arrow = if idx == self.selected_action {
-                    format!("{} ", Icons::ARROW_RIGHT)
-                } else {
-                    "  ".to_string()
-                };
-
-                let bg_color = if idx == self.selected_action {
-                    Some(Color::Rgb(40, 40, 80))
-                } else {
-                    None
-                };
-
-                // Create gradient text animation for selected action
-                if idx == self.selected_action {
-                    let mut spans = vec![
-                        Span::styled(arrow, Style::default().fg(*color)),
-                    ];
-
-                    // Animated gradient for each character in the name
-                    let chars: Vec<char> = name.chars().collect();
-                    for (char_idx, ch) in chars.iter().enumerate() {
-                        // Create a wave effect across the text
-                        let phase = (self.animation_frame as f32 / 10.0) + (char_idx as f32 / 3.0);
-                        let wave = ((phase * std::f32::consts::PI).sin() + 1.0) / 2.0;
-
-                        // Neon quantum gradient: Electric blue → Neon magenta → Bright cyan
-                        let r = ((wave * 0.7 + 0.3) * 255.0) as u8;  // More red for neon magenta
-                        let g = ((0.3 + (1.0 - wave) * 0.5) * 255.0) as u8;  // Controlled green
-                        let b = (((1.0 - wave) * 0.8 + 0.2) * 255.0) as u8;  // High blue for electric effect
-
-                        spans.push(Span::styled(
-                            ch.to_string(),
-                            Style::default()
-                                .fg(Color::Rgb(r, g, b))
-                                .bg(Color::Rgb(40, 40, 80))
-                                .add_modifier(Modifier::BOLD),
-                        ));
-                    }
-
-                    spans.push(Span::styled(format!(" [{}]", key), Style::default()
-                        .fg(Color::Rgb(120, 120, 150))
-                        .bg(Color::Rgb(40, 40, 80))));
-                    spans.push(Span::styled(format!(" - {}", desc), Style::default()
-                        .fg(Color::Rgb(150, 150, 170))
-                        .bg(Color::Rgb(40, 40, 80))));
-
-                    ListItem::new(Line::from(spans))
-                } else {
-                    let style = Style::default().fg(Color::Rgb(200, 200, 220));
-
-                    ListItem::new(Line::from(vec![
-                        Span::styled(arrow, Style::default().fg(*color)),
-                        Span::styled(name.clone(), style),
-                        Span::styled(format!(" [{}]", key), Style::default()
-                            .fg(Color::Rgb(120, 120, 150))),
-                        Span::styled(format!(" - {}", desc), Style::default()
-                            .fg(Color::Rgb(150, 150, 170))),
-                    ]))
-                }
+            .map(|(action, key, desc, color)| {
+                Row::new(vec![
+                    Line::from(Span::styled(*action, Style::default().fg(*color).add_modifier(Modifier::BOLD))),
+                    Line::from(Span::styled(*key, Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
+                    Line::from(Span::styled(*desc, Style::default().fg(Theme::SUBTEXT1))),
+                ])
             })
             .collect();
 
-        let pulse_actions = self.get_pulse_intensity();
-        let list = List::new(items)
+        let widths = [
+            Constraint::Length(15),  // Action name
+            Constraint::Length(6),   // Key
+            Constraint::Min(20),     // Description
+        ];
+
+        let table = Table::new(rows, widths)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Rgb(150, 0, pulse_actions)))  // Pulsing purple border
-                    .title(format!(" {} QUANTUM OPERATIONS (↑↓ select, Enter execute) ", Icons::ARROW_RIGHT))
-                    .title_style(Style::default()
-                        .fg(Color::Rgb(0, 255, 200))  // Static cyan
-                        .add_modifier(Modifier::BOLD)),
+                    .border_style(Style::default().fg(Theme::quantum()))
+                    .border_type(BorderType::Rounded)
+                    .title(" QUICK ACTIONS ")
+                    .title_style(Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD)),
             )
-            .style(Style::default().bg(Color::Rgb(25, 10, 50)));
+            .style(Style::default().bg(Theme::PANEL_BG))
+            .column_spacing(2)
+            .header(
+                Row::new(vec![
+                    Line::from(Span::styled("ACTION", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
+                    Line::from(Span::styled("KEY", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
+                    Line::from(Span::styled("DESCRIPTION", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
+                ])
+                .style(Style::default().bg(Theme::SURFACE0))
+                .bottom_margin(1)
+            );
 
-        f.render_widget(list, area);
+        f.render_widget(table, area);
     }
 
     fn render_footer(&self, f: &mut Frame, area: Rect) {
@@ -1511,56 +1427,57 @@ impl Dashboard {
             Span::styled(
                 " Q/Esc ",
                 Style::default()
-                    .fg(Color::Rgb(255, 255, 255))
-                    .bg(Color::Rgb(220, 50, 50))
+                    .fg(Theme::TEXT)
+                    .bg(Theme::RED)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" Quit  ", Style::default().fg(Color::Rgb(200, 200, 220))),
+            Span::styled(" Quit  ", Style::default().fg(Theme::SUBTEXT1)),
             Span::styled(
                 " H/? ",
                 Style::default()
-                    .fg(Color::Rgb(255, 255, 255))
-                    .bg(Color::Rgb(180, 100, 220))
+                    .fg(Theme::TEXT)
+                    .bg(Theme::PURPLE)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" Help  ", Style::default().fg(Color::Rgb(200, 200, 220))),
+            Span::styled(" Help  ", Style::default().fg(Theme::SUBTEXT1)),
             Span::styled(
                 " R ",
                 Style::default()
-                    .fg(Color::Rgb(20, 20, 40))
-                    .bg(Color::Rgb(100, 200, 255))
+                    .fg(Theme::BASE)
+                    .bg(Theme::CYAN)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" Refresh  ", Style::default().fg(Color::Rgb(200, 200, 220))),
+            Span::styled(" Refresh  ", Style::default().fg(Theme::SUBTEXT1)),
             Span::styled(
                 " ↑↓/jk ",
                 Style::default()
-                    .fg(Color::Rgb(20, 20, 40))
-                    .bg(Color::Rgb(100, 180, 255))
+                    .fg(Theme::BASE)
+                    .bg(Theme::BLUE)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" Navigate  ", Style::default().fg(Color::Rgb(200, 200, 220))),
+            Span::styled(" Navigate  ", Style::default().fg(Theme::SUBTEXT1)),
             Span::styled(
                 " Enter ",
                 Style::default()
-                    .fg(Color::Rgb(20, 20, 40))
-                    .bg(Color::Rgb(255, 220, 100))
+                    .fg(Theme::BASE)
+                    .bg(Theme::YELLOW)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" Execute", Style::default().fg(Color::Rgb(200, 200, 220))),
+            Span::styled(" Execute", Style::default().fg(Theme::SUBTEXT1)),
         ])];
         let pulse_footer = self.get_pulse_intensity();
         let footer = Paragraph::new(footer_text)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Rgb(150, 0, pulse_footer)))  // Pulsing purple border
+                    .border_style(Style::default().fg(Color::Rgb(150, 0, pulse_footer)))
+                    .border_type(BorderType::Rounded)
                     .title(format!(" {} CONTROLS ", Icons::KEYBOARD))
                     .title_style(Style::default()
-                        .fg(Color::Rgb(0, 255, 200))  // Static cyan
+                        .fg(Theme::CYAN_NEON)
                         .add_modifier(Modifier::BOLD)),
             )
-            .style(Style::default().bg(Color::Rgb(25, 10, 50)))
+            .style(Style::default().bg(Theme::PANEL_BG))
             .alignment(Alignment::Center);
         f.render_widget(footer, footer_chunks[0]);
 
@@ -1576,13 +1493,13 @@ impl Dashboard {
         let status_color = if self.unlock_success_message.as_ref()
             .map(|m| m.starts_with("✓"))
             .unwrap_or(false) {
-            Color::Green
+            Theme::GREEN_NEON
         } else if self.unlock_success_message.as_ref()
             .map(|m| m.starts_with("✗"))
             .unwrap_or(false) {
-            Color::Red
+            Theme::RED_NEON
         } else {
-            Color::Cyan
+            Theme::CYAN_NEON
         };
 
         let status_widget = Paragraph::new(status_msg)
@@ -1592,8 +1509,11 @@ impl Dashboard {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(status_color))
-                    .title(" Status ")
-            );
+                    .border_type(BorderType::Rounded)
+                    .title(" STATUS ")
+                    .title_style(Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))
+            )
+            .style(Style::default().bg(Theme::PANEL_BG));
 
         f.render_widget(status_widget, footer_chunks[1]);
     }
@@ -1602,34 +1522,34 @@ impl Dashboard {
         let help_text = vec![
             Line::from(Span::styled(
                 "QDUM VAULT - HELP",
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from(vec![
-                Span::styled("Navigation:", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                Span::styled("Navigation:", Style::default().fg(Theme::GREEN_NEON).add_modifier(Modifier::BOLD)),
             ]),
-            Line::from("  ↑/↓ or j/k  - Navigate actions"),
-            Line::from("  Enter       - Execute selected action"),
+            Line::from(Span::styled("  ↑/↓ or j/k  - Navigate actions", Style::default().fg(Theme::TEXT))),
+            Line::from(Span::styled("  Enter       - Execute selected action", Style::default().fg(Theme::TEXT))),
             Line::from(""),
             Line::from(vec![
-                Span::styled("Actions:", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                Span::styled("Actions:", Style::default().fg(Theme::GREEN_NEON).add_modifier(Modifier::BOLD)),
             ]),
-            Line::from("  G or 1      - Register PQ account"),
-            Line::from("  L           - Lock vault"),
-            Line::from("  U           - Unlock vault"),
-            Line::from("  T or 2      - Transfer tokens"),
-            Line::from("  R           - Refresh status"),
-            Line::from("  C           - Copy wallet address"),
+            Line::from(Span::styled("  G or 1      - Register PQ account", Style::default().fg(Theme::TEXT))),
+            Line::from(Span::styled("  L           - Lock vault", Style::default().fg(Theme::TEXT))),
+            Line::from(Span::styled("  U           - Unlock vault", Style::default().fg(Theme::TEXT))),
+            Line::from(Span::styled("  T or 2      - Transfer tokens", Style::default().fg(Theme::TEXT))),
+            Line::from(Span::styled("  R           - Refresh status", Style::default().fg(Theme::TEXT))),
+            Line::from(Span::styled("  C           - Copy wallet address", Style::default().fg(Theme::TEXT))),
             Line::from(""),
             Line::from(vec![
-                Span::styled("Other:", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                Span::styled("Other:", Style::default().fg(Theme::GREEN_NEON).add_modifier(Modifier::BOLD)),
             ]),
-            Line::from("  H or ?      - Show this help"),
-            Line::from("  Q or Esc    - Quit dashboard"),
+            Line::from(Span::styled("  H or ?      - Show this help", Style::default().fg(Theme::TEXT))),
+            Line::from(Span::styled("  Q or Esc    - Quit dashboard", Style::default().fg(Theme::TEXT))),
             Line::from(""),
             Line::from(Span::styled(
                 "Press any key to close help",
-                Style::default().fg(Color::Yellow),
+                Style::default().fg(Theme::YELLOW_NEON),
             )),
         ];
 
@@ -1643,10 +1563,12 @@ impl Dashboard {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-                    .title(" Help ")
-                    .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    .border_style(Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))
+                    .border_type(BorderType::Rounded)
+                    .title(" HELP ")
+                    .title_style(Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD)),
             )
+            .style(Style::default().bg(Theme::PANEL_BG))
             .alignment(Alignment::Left)
             .wrap(Wrap { trim: true });
 
