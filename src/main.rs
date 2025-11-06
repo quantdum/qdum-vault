@@ -15,6 +15,7 @@ use std::time::Duration;
 mod crypto;
 mod solana;
 mod dashboard;
+mod theme;
 
 use crypto::sphincs::SphincsKeyManager;
 use solana::client::VaultClient;

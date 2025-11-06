@@ -25,6 +25,7 @@ use std::thread;
 use crate::crypto::sphincs::SphincsKeyManager;
 use crate::solana::client::VaultClient;
 use crate::icons::Icons;
+use crate::theme::Theme;
 
 /// Helper function to suppress stdout/stderr during operation
 /// This prevents CLI output from glitching behind the TUI
@@ -1323,17 +1324,17 @@ impl Dashboard {
         // Much more dramatic status colors with wider range
         let (status_color, status_bg, status_icon) = if let Some(ref status) = self.vault_status {
             if status.is_locked {
-                // LOCKED: Dramatic red/pink pulsing with icon
+                // LOCKED: Red theme from Catppuccin
                 let icon = if bright { "▓▓▓ [X] LOCKED ▓▓▓" } else { "░░░ [X] LOCKED ░░░" };
-                (Color::Rgb(pulse, 0, 100), Color::Rgb(pulse / 2, 0, 40), icon)
+                (Theme::locked(), Theme::MAROON, icon)
             } else {
-                // UNLOCKED: Dramatic green pulsing with icon
+                // UNLOCKED: Green theme from Catppuccin
                 let icon = if bright { "▓▓▓ [O] UNLOCKED ▓▓▓" } else { "░░░ [O] UNLOCKED ░░░" };
-                (Color::Rgb(0, pulse, 100), Color::Rgb(0, pulse / 2, 30), icon)
+                (Theme::unlocked(), Theme::TEAL, icon)
             }
         } else {
             let icon = if bright { "▓▓▓ [~] LOADING ▓▓▓" } else { "░░░ [~] LOADING ░░░" };
-            (Color::Rgb(pulse, pulse, 0), Color::Rgb(pulse / 2, pulse / 2, 0), icon)
+            (Theme::warning(), Theme::PEACH, icon)
         };
 
         let balance_text = if let Some(balance) = self.balance {
@@ -1360,50 +1361,50 @@ impl Dashboard {
             ListItem::new(Line::from("")),
             // LARGE ANIMATED BALANCE DISPLAY - Solid fill with inverted text
             ListItem::new(Line::from(vec![
-                Span::styled("  ┌────────────────────────┐", Style::default().fg(Color::Rgb(pulse, pulse, 0))),
+                Span::styled("  ┌────────────────────────┐", Style::default().fg(Theme::YELLOW)),
             ])),
             ListItem::new(Line::from(vec![
-                Span::styled("  │", Style::default().fg(Color::Rgb(pulse, pulse, 0))),
+                Span::styled("  │", Style::default().fg(Theme::YELLOW)),
                 Span::styled(format!("{:<24}", balance_text), Style::default()
-                    .fg(Color::Rgb(25, 10, 50))  // Background purple color for text
-                    .bg(Color::Rgb(pulse, pulse, 0))  // Pulsing yellow solid fill matching border
+                    .fg(Theme::BASE)  // Dark background for text
+                    .bg(Theme::YELLOW)  // Yellow solid fill
                     .add_modifier(Modifier::BOLD)),
-                Span::styled("│", Style::default().fg(Color::Rgb(pulse, pulse, 0))),
+                Span::styled("│", Style::default().fg(Theme::YELLOW)),
             ])),
             ListItem::new(Line::from(vec![
-                Span::styled("  └────────────────────────┘", Style::default().fg(Color::Rgb(pulse, pulse, 0))),
-            ])),
-            ListItem::new(Line::from("")),
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("{} ", Icons::ALGORITHM), Style::default().fg(Color::Rgb(150, 0, 255))),
-                Span::styled("ALGORITHM: ", Style::default().fg(Color::Rgb(255, 0, 200))),
-                Span::styled("SPHINCS+-SHA2-128s", Style::default().fg(Color::Rgb(0, 255, 200))),
-            ])),
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("{} ", Icons::SECURITY), Style::default().fg(Color::Rgb(150, 0, 255))),
-                Span::styled("SECURITY: ", Style::default().fg(Color::Rgb(255, 0, 200))),
-                Span::styled("NIST FIPS 205", Style::default().fg(Color::Rgb(0, 255, 200))),
+                Span::styled("  └────────────────────────┘", Style::default().fg(Theme::YELLOW)),
             ])),
             ListItem::new(Line::from("")),
             ListItem::new(Line::from(vec![
-                Span::styled(format!("{} ", Icons::NETWORK), Style::default().fg(Color::Rgb(0, 200, 255))),
-                Span::styled("NETWORK: ", Style::default().fg(Color::Rgb(255, 0, 200))),
-                Span::styled("Solana Devnet", Style::default().fg(Color::Rgb(0, 255, 100))),
+                Span::styled(format!("{} ", Icons::ALGORITHM), Style::default().fg(Theme::MAUVE)),
+                Span::styled("ALGORITHM: ", Style::default().fg(Theme::PINK)),
+                Span::styled("SPHINCS+-SHA2-128s", Style::default().fg(Theme::SAPPHIRE)),
+            ])),
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("{} ", Icons::SECURITY), Style::default().fg(Theme::MAUVE)),
+                Span::styled("SECURITY: ", Style::default().fg(Theme::PINK)),
+                Span::styled("NIST FIPS 205", Style::default().fg(Theme::SAPPHIRE)),
+            ])),
+            ListItem::new(Line::from("")),
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("{} ", Icons::NETWORK), Style::default().fg(Theme::SKY)),
+                Span::styled("NETWORK: ", Style::default().fg(Theme::PINK)),
+                Span::styled("Solana Devnet", Style::default().fg(Theme::GREEN)),
             ])),
         ];
 
-        let pulse_for_border = self.get_pulse_intensity();
         let list = List::new(items)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Rgb(150, 0, pulse_for_border)))  // Pulsing purple border
+                    .border_style(Style::default().fg(Theme::quantum()))  // Quantum purple border
+                    .border_type(ratatui::widgets::BorderType::Rounded)
                     .title(" [≡] VAULT STATUS ")
                     .title_style(Style::default()
-                        .fg(Color::Rgb(0, 255, 200))  // Static cyan title
+                        .fg(Theme::SAPPHIRE)  // Sapphire cyan title
                         .add_modifier(Modifier::BOLD)),
             )
-            .style(Style::default().bg(Color::Rgb(25, 10, 50)));
+            .style(Style::default().bg(Theme::BASE));
 
         f.render_widget(list, area);
     }
