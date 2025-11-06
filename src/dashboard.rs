@@ -10,7 +10,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Gauge, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
     Frame, Terminal,
 };
 use solana_sdk::pubkey::Pubkey;
@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use std::fs::OpenOptions;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
 use crate::crypto::sphincs::SphincsKeyManager;
@@ -118,6 +119,8 @@ pub struct Dashboard {
     progress_total: usize,
     progress_message: String,
     progress_state_shared: Option<Arc<Mutex<(usize, usize, String)>>>,  // Shared progress for background thread
+    unlock_complete: Option<Arc<AtomicBool>>,  // Flag to detect when unlock finishes
+    unlock_success_message: Option<String>,  // Success message to display
     // Transfer state
     transfer_recipient: String,
     transfer_amount: String,
@@ -165,6 +168,8 @@ impl Dashboard {
             progress_total: 0,
             progress_message: String::new(),
             progress_state_shared: None,
+            unlock_complete: None,
+            unlock_success_message: None,
             transfer_recipient: String::new(),
             transfer_amount: String::new(),
             transfer_focused_field: TransferInputField::Recipient,
@@ -266,6 +271,56 @@ impl Dashboard {
                             self.action_steps[0] = ActionStep::InProgress(new_message);
                         }
                     }
+                }
+            }
+
+            // Check if unlock is complete
+            if let Some(ref unlock_flag) = self.unlock_complete {
+                if unlock_flag.load(Ordering::SeqCst) {
+                    // Unlock finished - check if it was successful
+                    let is_success = self.progress_current == self.progress_total && self.progress_total > 0;
+
+                    if is_success {
+                        // Success! Close popup, refresh vault status, and show success message
+                        self.unlock_success_message = Some("✓ Vault unlocked successfully!".to_string());
+                        self.mode = AppMode::Normal;
+                        self.needs_clear = true;
+
+                        // Refresh vault status (create new runtime for async calls)
+                        let vault_client = &self.vault_client;
+                        let wallet = self.wallet;
+                        let mint = self.mint;
+
+                        if let Ok(rt) = tokio::runtime::Runtime::new() {
+                            let status_result = rt.block_on(async {
+                                vault_client.get_vault_status(wallet).await
+                            });
+
+                            if let Ok((is_locked, pda)) = status_result {
+                                self.vault_status = Some(VaultStatus {
+                                    is_locked,
+                                    pda: Some(pda),
+                                });
+                            }
+
+                            // Refresh balance
+                            let balance_result = rt.block_on(async {
+                                vault_client.get_balance(wallet, mint).await
+                            });
+                            if let Ok(bal) = balance_result {
+                                self.balance = Some(bal);
+                            }
+                        }
+                    } else {
+                        // Failed - show error message
+                        self.unlock_success_message = Some(format!("✗ {}", self.progress_message));
+                        self.mode = AppMode::Normal;
+                        self.needs_clear = true;
+                    }
+
+                    // Clear unlock tracking
+                    self.unlock_complete = None;
+                    self.progress_state_shared = None;
                 }
             }
 
@@ -416,6 +471,9 @@ impl Dashboard {
                 }
             }
             AppMode::Normal => {
+                // Clear unlock success message on any keypress
+                self.unlock_success_message = None;
+
                 match code {
                     KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
                         self.should_quit = true;
@@ -727,6 +785,7 @@ impl Dashboard {
         // Flag to indicate unlock is complete
         let unlock_complete = Arc::new(AtomicBool::new(false));
         let unlock_complete_clone = Arc::clone(&unlock_complete);
+        self.unlock_complete = Some(Arc::clone(&unlock_complete));
 
         // Spawn unlock operation as a tokio task - DO ALL WORK IN BACKGROUND
         let keypair_path_str = self.keypair_path.to_str().unwrap().to_string();
@@ -1501,18 +1560,34 @@ impl Dashboard {
             .alignment(Alignment::Center);
         f.render_widget(footer, footer_chunks[0]);
 
-        // Status message - always show
-        let status_msg = self.status_message.as_ref()
-            .map(|s| s.clone())
-            .unwrap_or_else(|| "Ready - Press H or ? for help, Q to quit".to_string());
+        // Status message - prioritize unlock success message
+        let status_msg = if let Some(ref success_msg) = self.unlock_success_message {
+            success_msg.clone()
+        } else if let Some(ref msg) = self.status_message {
+            msg.clone()
+        } else {
+            "Ready - Press H or ? for help, Q to quit".to_string()
+        };
+
+        let status_color = if self.unlock_success_message.as_ref()
+            .map(|m| m.starts_with("✓"))
+            .unwrap_or(false) {
+            Color::Green
+        } else if self.unlock_success_message.as_ref()
+            .map(|m| m.starts_with("✗"))
+            .unwrap_or(false) {
+            Color::Red
+        } else {
+            Color::Cyan
+        };
 
         let status_widget = Paragraph::new(status_msg)
-            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+            .style(Style::default().fg(status_color).add_modifier(Modifier::BOLD))
             .alignment(Alignment::Center)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Cyan))
+                    .border_style(Style::default().fg(status_color))
                     .title(" Status ")
             );
 
@@ -1658,72 +1733,128 @@ impl Dashboard {
     }
 
     fn render_unlock_popup(&self, f: &mut Frame, area: Rect) {
-        let popup_area = centered_rect(70, 50, area);
+        let popup_area = centered_rect(80, 80, area);
         f.render_widget(Clear, popup_area);
 
-        // Calculate percentage - exactly like the reference code
-        let percent = if self.progress_total > 0 {
-            ((self.progress_current as f64 / self.progress_total as f64) * 100.0) as u16
-        } else {
-            0
-        };
+        let pulse = self.get_pulse_intensity();
+        let bg_color = Color::Rgb(10, 5, 20);
 
-        // Split popup into sections
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .margin(3)
-            .constraints([
-                Constraint::Length(3),  // Title
-                Constraint::Length(3),  // Gauge
-                Constraint::Min(3),     // Status
-                Constraint::Length(2),  // Controls
-            ])
-            .split(popup_area);
+        // Calculate how many rows we can fit (popup height - borders - padding)
+        let available_height = popup_area.height.saturating_sub(4); // borders + margins
+        let total_rows = available_height as usize;
+        let center_row = total_rows / 2;
 
-        // Title - add animation frame to verify rendering is happening
-        let title = Paragraph::new(format!("UNLOCKING - {}/{} ({}%) Frame:{}",
-            self.progress_current,
-            self.progress_total,
-            percent,
-            self.animation_frame % 10))
-            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
-            .alignment(Alignment::Center);
-        f.render_widget(title, chunks[0]);
+        // Build animated quantum block rows with message in center
+        let block_chars = ["█", "▓", "▒", "░"];
+        let blocks_per_row = (popup_area.width.saturating_sub(4)) as usize; // full width minus borders
 
-        // Gauge - EXACTLY like reference code with percent() method
-        let label = format!("{}%", percent);
-        let gauge = Gauge::default()
-            .block(Block::default().borders(Borders::ALL).title(" Progress "))
-            .gauge_style(Style::default().fg(Color::Cyan).bg(Color::Black))
-            .percent(percent)
-            .label(label);
-        f.render_widget(gauge, chunks[1]);
+        let mut text_lines = vec![];
 
-        // Status message
-        let status_msg = if !self.progress_message.is_empty() {
-            self.progress_message.clone()
-        } else {
-            "Starting...".to_string()
-        };
-        let status = Paragraph::new(status_msg)
-            .style(Style::default().fg(Color::White))
-            .alignment(Alignment::Center)
-            .wrap(Wrap { trim: true });
-        f.render_widget(status, chunks[2]);
+        for row in 0..total_rows {
+            if row == center_row {
+                // Center message row
+                let msg = "🔓 UNLOCKING VAULT - PLEASE WAIT... 🔓";
+                let padding = (blocks_per_row.saturating_sub(msg.len())) / 2;
 
-        // Controls
-        let controls = Paragraph::new("[Esc] Close")
-            .style(Style::default().fg(Color::Gray))
-            .alignment(Alignment::Center);
-        f.render_widget(controls, chunks[3]);
+                let mut spans = vec![];
+                // Blocks before message
+                for i in 0..padding {
+                    let offset = (i + row * 3 + self.animation_frame as usize) % 8;
+                    let block_idx = offset / 2;
+                    let block_char = block_chars[block_idx.min(3)];
+                    let intensity = ((offset as f64 / 8.0) * 155.0 + 100.0) as u8;
+                    let color = Color::Rgb(0, intensity, intensity + 50);
+                    spans.push(Span::styled(block_char, Style::default().fg(color).bg(bg_color)));
+                }
+                // Message
+                spans.push(Span::styled(
+                    msg,
+                    Style::default()
+                        .fg(Color::Rgb(255, 255, 0))
+                        .bg(bg_color)
+                        .add_modifier(Modifier::BOLD)
+                ));
+                // Blocks after message
+                for i in (padding + msg.len())..blocks_per_row {
+                    let offset = (i + row * 3 + self.animation_frame as usize) % 8;
+                    let block_idx = offset / 2;
+                    let block_char = block_chars[block_idx.min(3)];
+                    let intensity = ((offset as f64 / 8.0) * 155.0 + 100.0) as u8;
+                    let color = Color::Rgb(0, intensity, intensity + 50);
+                    spans.push(Span::styled(block_char, Style::default().fg(color).bg(bg_color)));
+                }
+                text_lines.push(Line::from(spans));
+            } else if row == center_row + 1 {
+                // Subtext row
+                let status = if self.progress_current > 0 && self.progress_current < self.progress_total {
+                    format!("Verifying SPHINCS+ signature ({}/{})", self.progress_current, self.progress_total)
+                } else {
+                    "Starting verification...".to_string()
+                };
+                let padding = (blocks_per_row.saturating_sub(status.len())) / 2;
 
-        // Border LAST
-        let border = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
-            .title(" UNLOCK VAULT ")
-            .style(Style::default().bg(Color::Black));
-        f.render_widget(border, popup_area);
+                let mut spans = vec![];
+                // Blocks before status
+                for i in 0..padding {
+                    let offset = (i + row * 3 + self.animation_frame as usize) % 8;
+                    let block_idx = offset / 2;
+                    let block_char = block_chars[block_idx.min(3)];
+                    let intensity = ((offset as f64 / 8.0) * 155.0 + 100.0) as u8;
+                    let color = Color::Rgb(0, intensity, intensity + 50);
+                    spans.push(Span::styled(block_char, Style::default().fg(color).bg(bg_color)));
+                }
+                // Status
+                spans.push(Span::styled(
+                    status.clone(),
+                    Style::default()
+                        .fg(Color::Rgb(150, 150, 200))
+                        .bg(bg_color)
+                ));
+                // Blocks after status
+                for i in (padding + status.len())..blocks_per_row {
+                    let offset = (i + row * 3 + self.animation_frame as usize) % 8;
+                    let block_idx = offset / 2;
+                    let block_char = block_chars[block_idx.min(3)];
+                    let intensity = ((offset as f64 / 8.0) * 155.0 + 100.0) as u8;
+                    let color = Color::Rgb(0, intensity, intensity + 50);
+                    spans.push(Span::styled(block_char, Style::default().fg(color).bg(bg_color)));
+                }
+                text_lines.push(Line::from(spans));
+            } else {
+                // Full row of animated quantum blocks
+                let mut spans = vec![];
+                for i in 0..blocks_per_row {
+                    // Calculate animation offset based on row, column, and frame
+                    let offset = (i + row * 3 + self.animation_frame as usize) % 8;
+                    let block_idx = offset / 2;
+                    let block_char = block_chars[block_idx.min(3)];
+
+                    // Color gradient based on position and animation
+                    let intensity = ((offset as f64 / 8.0) * 155.0 + 100.0) as u8;
+                    let color = Color::Rgb(0, intensity, intensity + 50);
+
+                    spans.push(Span::styled(
+                        block_char,
+                        Style::default().fg(color).bg(bg_color)
+                    ));
+                }
+                text_lines.push(Line::from(spans));
+            }
+        }
+
+        let popup_paragraph = Paragraph::new(text_lines)
+            .style(Style::default().bg(bg_color).fg(Color::White))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Rgb(pulse, pulse, 0)).add_modifier(Modifier::BOLD))
+                    .title(" QUANTUM VAULT UNLOCK ")
+                    .title_style(Style::default().fg(Color::Rgb(255, 255, 0)).add_modifier(Modifier::BOLD))
+                    .style(Style::default().bg(bg_color)),
+            )
+            .alignment(Alignment::Left);
+
+        f.render_widget(popup_paragraph, popup_area);
     }
 
     fn render_transfer_popup(&self, f: &mut Frame, area: Rect) {
