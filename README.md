@@ -14,13 +14,18 @@ Quantum-resistant vault management tool for Quantdum tokens with an interactive 
 
 ## Tokenomics
 
-The QDUM token has a fixed supply with no minting capabilities:
+The QDUM token has a **fixed total supply** of **4,294,967,296 QDUM** (2³² tokens) with 6 decimals.
 
-- **80%** - Locked liquidity
-- **17%** - Protocol reserves
-- **3%** - Community airdrop
+**Distribution:**
+- **80% (3,435,973,836.8 QDUM)** - Initial liquidity pool (locked at program initialization)
+- **17% (730,144,440.32 QDUM)** - Protocol reserves (minted to dev wallet at initialization)
+- **3% (128,849,018.88 QDUM)** - Community airdrops (distributed at authority's discretion)
 
-All tokens are created at genesis. There is no minting functionality.
+**Minting Model:**
+- Initial distribution function mints 97% (80% + 17%) in a single transaction at program setup
+- Mint authority is then transferred to a PDA, preventing unauthorized minting
+- Airdrop function allows authority-controlled distribution of the remaining 3%
+- Total supply is cryptographically enforced - no tokens can be minted beyond 4,294,967,296 QDUM
 
 ## Prerequisites
 
