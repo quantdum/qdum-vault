@@ -1,6 +1,6 @@
 [package]
 name = "qdum-vault"
-version = "1.7.0"
+version = "1.8.0"
 edition = "2021"
 authors = ["QDUM Team"]
 description = "Quantum-resistant vault CLI for Solana using SPHINCS+ post-quantum signatures"

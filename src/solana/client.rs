@@ -35,6 +35,7 @@ const INITIALIZE_PQ_ACCOUNT_DISCRIMINATOR: [u8; 8] = [185, 126, 40, 29, 205, 105
 const WRITE_PUBLIC_KEY_DISCRIMINATOR: [u8; 8] = [69, 199, 141, 25, 213, 45, 192, 226];
 const LOCK_TOKENS_DISCRIMINATOR: [u8; 8] = [136, 11, 32, 232, 161, 117, 54, 211];
 const CLOSE_PQ_ACCOUNT_DISCRIMINATOR: [u8; 8] = [213, 32, 12, 184, 191, 154, 92, 97];
+const CLAIM_AIRDROP_DISCRIMINATOR: [u8; 8] = [137, 50, 122, 111, 89, 254, 8, 20];
 
 // SPHINCS+ verification flow discriminators
 const INITIALIZE_SPHINCS_STORAGE_DISCRIMINATOR: [u8; 8] = [140, 15, 169, 242, 61, 148, 238, 70];
@@ -394,6 +395,93 @@ impl VaultClient {
         println!();
         println!("⚠️  Your PQ account is now closed. You will need to re-register");
         println!("   if you want to use quantum-resistant features again.");
+        println!();
+
+        Ok(())
+    }
+
+    /// Claim daily 100 QDUM airdrop (24-hour cooldown, requires initialized PQ account)
+    pub async fn claim_airdrop(&self, wallet: Pubkey, keypair_path: &str, mint: Pubkey) -> Result<()> {
+        let keypair = self.load_keypair(keypair_path)?;
+
+        // Derive PQ account PDA
+        let (pq_account, _bump) = Pubkey::find_program_address(
+            &[b"pq_account", wallet.as_ref()],
+            &self.program_id,
+        );
+
+        // Derive mint state PDA
+        let (mint_state, _) = Pubkey::find_program_address(
+            &[b"state"],
+            &self.program_id,
+        );
+
+        // Derive mint authority PDA
+        let (mint_authority, _) = Pubkey::find_program_address(
+            &[b"mint_authority"],
+            &self.program_id,
+        );
+
+        // Get associated token account
+        let recipient_token_account = get_associated_token_address(&wallet, &mint, &TOKEN_2022_PROGRAM_ID);
+
+        println!("Claiming 100 QDUM airdrop...");
+
+        // Check if associated token account exists, create if needed
+        let mut instructions = Vec::new();
+        let account_info = self.rpc_client.get_account(&recipient_token_account);
+        if account_info.is_err() {
+            println!("Creating associated token account...");
+            // Create ATA instruction
+            let create_ata_ix = Instruction {
+                program_id: solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"),
+                accounts: vec![
+                    solana_sdk::instruction::AccountMeta::new(keypair.pubkey(), true),  // payer
+                    solana_sdk::instruction::AccountMeta::new(recipient_token_account, false), // ata
+                    solana_sdk::instruction::AccountMeta::new_readonly(wallet, false),  // owner
+                    solana_sdk::instruction::AccountMeta::new_readonly(mint, false),    // mint
+                    solana_sdk::instruction::AccountMeta::new_readonly(solana_sdk::system_program::ID, false), // system_program
+                    solana_sdk::instruction::AccountMeta::new_readonly(TOKEN_2022_PROGRAM_ID, false), // token_program
+                ],
+                data: vec![],  // create instruction has no data
+            };
+            instructions.push(create_ata_ix);
+        }
+
+        let claim_instruction_data = CLAIM_AIRDROP_DISCRIMINATOR.to_vec();
+
+        let claim_instruction = Instruction {
+            program_id: self.program_id,
+            accounts: vec![
+                solana_sdk::instruction::AccountMeta::new(keypair.pubkey(), true),  // claimer (signer)
+                solana_sdk::instruction::AccountMeta::new(pq_account, false),        // pq_account
+                solana_sdk::instruction::AccountMeta::new(mint_state, false),        // mint_state
+                solana_sdk::instruction::AccountMeta::new_readonly(mint_authority, false), // mint_authority
+                solana_sdk::instruction::AccountMeta::new(mint, false), // mint
+                solana_sdk::instruction::AccountMeta::new(recipient_token_account, false), // recipient_token_account
+                solana_sdk::instruction::AccountMeta::new_readonly(TOKEN_2022_PROGRAM_ID, false), // token_program
+            ],
+            data: claim_instruction_data,
+        };
+        instructions.push(claim_instruction);
+
+        let recent_blockhash = self.rpc_client.get_latest_blockhash()?;
+        let transaction = Transaction::new_signed_with_payer(
+            &instructions,
+            Some(&keypair.pubkey()),
+            &[&keypair],
+            recent_blockhash,
+        );
+
+        let signature = self.rpc_client.send_and_confirm_transaction(&transaction)?;
+
+        println!();
+        println!("{}", "✅ Airdrop Claimed Successfully!".green().bold());
+        println!("   Transaction: {}", signature.to_string().cyan());
+        println!("   View on Solscan: https://solscan.io/tx/{}?cluster=devnet", signature);
+        println!();
+        println!("💰 Received: {}", "100 QDUM".green().bold());
+        println!("⏰ Next claim available in: {}", "24 hours".yellow());
         println!();
 
         Ok(())
@@ -1720,6 +1808,46 @@ impl VaultClient {
         cache.as_ref().and_then(|c| {
             SystemTime::now().duration_since(c.timestamp).ok()
         })
+    }
+
+    /// Get airdrop pool statistics (total distributed and remaining)
+    pub async fn get_airdrop_stats(&self) -> Result<(u64, u64)> {
+        // Derive mint state PDA
+        let (mint_state_pda, _) = Pubkey::find_program_address(
+            &[b"state"],
+            &self.program_id,
+        );
+
+        // Fetch mint state account
+        let account = self.rpc_client.get_account(&mint_state_pda)?;
+
+        // MintState layout:
+        // 0-7: discriminator (8)
+        // 8-39: authority (32)
+        // 40-71: mint (32)
+        // 72-79: total_minted (8)
+        // 80-111: dev_wallet (32)
+        // 112-143: transfer_hook_program (32)
+        // 144-151: authority_minted (8)
+        // 152-159: airdrop_distributed (8)
+
+        const AIRDROP_DISTRIBUTED_OFFSET: usize = 152;
+
+        if account.data.len() < AIRDROP_DISTRIBUTED_OFFSET + 8 {
+            return Err(anyhow::anyhow!("Invalid mint state account data"));
+        }
+
+        let airdrop_distributed = u64::from_le_bytes(
+            account.data[AIRDROP_DISTRIBUTED_OFFSET..AIRDROP_DISTRIBUTED_OFFSET + 8]
+                .try_into()
+                .unwrap()
+        );
+
+        // Total airdrop cap: 3% of supply = 128,849,018.88 QDUM (with 6 decimals)
+        const AIRDROP_CAP: u64 = 128_849_018_880_000;
+        let remaining = AIRDROP_CAP.saturating_sub(airdrop_distributed);
+
+        Ok((airdrop_distributed, remaining))
     }
 
 }

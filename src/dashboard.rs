@@ -81,6 +81,8 @@ enum AppMode {
     LockPopup,
     UnlockPopup,
     TransferPopup,
+    AirdropClaimPopup,
+    AirdropStatsPopup,
     VaultSwitchPopup,
     DeleteConfirmPopup,
     CloseConfirmPopup,
@@ -98,6 +100,21 @@ enum TransferInputField {
 enum VaultManagementMode {
     List,      // Showing list of vaults
     Create,    // Creating new vault
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ChartType {
+    LockedAmount,
+    HolderCount,
+}
+
+impl ChartType {
+    fn to_string(&self) -> &str {
+        match self {
+            ChartType::LockedAmount => "LOCKED QDUM",
+            ChartType::HolderCount => "LOCKED HOLDERS",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -189,7 +206,12 @@ pub struct Dashboard {
     animation_frame: u8,  // Counter for animation frames
     last_animation_update: std::time::Instant,
     // Chart state
+    chart_type: ChartType,
     chart_timeframe: ChartTimeframe,
+    airdrop_timeframe: ChartTimeframe,
+    // Cached airdrop stats
+    airdrop_distributed: u64,
+    airdrop_remaining: u64,
 }
 
 #[derive(Clone)]
@@ -203,6 +225,54 @@ struct LockHistoryEntry {
     timestamp: String,      // ISO 8601 format
     locked_amount: f64,     // Total amount of QDUM locked network-wide
     holder_count: usize,    // Number of addresses with locked tokens
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct AirdropHistoryEntry {
+    timestamp: String,       // ISO 8601 format
+    distributed: f64,        // Total QDUM claimed from airdrop pool
+    remaining: f64,          // Remaining QDUM in pool (out of 3% cap)
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct AirdropHistory {
+    entries: Vec<AirdropHistoryEntry>,
+}
+
+impl AirdropHistory {
+    fn load() -> Result<Self> {
+        let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?;
+        let history_path = home.join(".qdum").join("airdrop_history.json");
+
+        if history_path.exists() {
+            let contents = std::fs::read_to_string(&history_path)?;
+            let history: AirdropHistory = serde_json::from_str(&contents)?;
+            Ok(history)
+        } else {
+            Ok(AirdropHistory { entries: Vec::new() })
+        }
+    }
+
+    fn save(&self) -> Result<()> {
+        let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?;
+        let vault_dir = home.join(".qdum");
+        std::fs::create_dir_all(&vault_dir)?;
+
+        let history_path = vault_dir.join("airdrop_history.json");
+        let contents = serde_json::to_string_pretty(self)?;
+        std::fs::write(&history_path, contents)?;
+        Ok(())
+    }
+
+    fn add_entry(&mut self, distributed: f64, remaining: f64) {
+        use chrono::Utc;
+        let timestamp = Utc::now().to_rfc3339();
+        self.entries.push(AirdropHistoryEntry {
+            timestamp,
+            distributed,
+            remaining,
+        });
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -302,7 +372,11 @@ impl Dashboard {
             close_confirmation_input: String::new(),
             animation_frame: 0,
             last_animation_update: std::time::Instant::now(),
+            chart_type: ChartType::LockedAmount,
             chart_timeframe: ChartTimeframe::All,
+            airdrop_timeframe: ChartTimeframe::All,
+            airdrop_distributed: 0,
+            airdrop_remaining: 0,
         })
     }
 
@@ -530,8 +604,24 @@ impl Dashboard {
                 self.status_message = None;
             }
             AppMode::ChartPopup => {
-                // Esc closes chart popup, R refreshes data, L shows log, m/1/5/7/3/a changes timeframe
+                // TAB or arrows switch chart type, Esc closes, R refreshes, m/1/5/7/3/a changes timeframe
                 match code {
+                    KeyCode::Tab | KeyCode::Right => {
+                        // Switch to next chart type
+                        self.chart_type = match self.chart_type {
+                            ChartType::LockedAmount => ChartType::HolderCount,
+                            ChartType::HolderCount => ChartType::LockedAmount,
+                        };
+                        self.status_message = Some(format!("📊 Showing {}", self.chart_type.to_string()));
+                    }
+                    KeyCode::Left => {
+                        // Switch to previous chart type (same as TAB for 2 types)
+                        self.chart_type = match self.chart_type {
+                            ChartType::LockedAmount => ChartType::HolderCount,
+                            ChartType::HolderCount => ChartType::LockedAmount,
+                        };
+                        self.status_message = Some(format!("📊 Showing {}", self.chart_type.to_string()));
+                    }
                     KeyCode::Esc => {
                         self.mode = AppMode::Normal;
                         self.status_message = None;
@@ -845,6 +935,34 @@ impl Dashboard {
                     KeyCode::Char('t') | KeyCode::Char('T') | KeyCode::Char('2') => {
                         self.execute_transfer();
                     }
+                    KeyCode::Char('a') | KeyCode::Char('A') => {
+                        self.execute_claim_airdrop();
+                    }
+                    KeyCode::Char('p') | KeyCode::Char('P') => {
+                        // Fetch airdrop stats before showing popup
+                        if let Ok((distributed, remaining)) = tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current().block_on(async {
+                                self.vault_client.get_airdrop_stats().await
+                            })
+                        }) {
+                            self.airdrop_distributed = distributed;
+                            self.airdrop_remaining = remaining;
+
+                            // Save to history
+                            let distributed_qdum = distributed as f64 / 1_000_000.0;
+                            let remaining_qdum = remaining as f64 / 1_000_000.0;
+                            if let Ok(mut history) = AirdropHistory::load() {
+                                history.add_entry(distributed_qdum, remaining_qdum);
+                                let _ = history.save();
+                            }
+
+                            self.mode = AppMode::AirdropStatsPopup;
+                            self.needs_clear = true;
+                            self.status_message = Some("Viewing airdrop pool stats...".to_string());
+                        } else {
+                            self.status_message = Some("Failed to fetch airdrop stats".to_string());
+                        }
+                    }
                     KeyCode::Char('x') | KeyCode::Char('X') | KeyCode::Char('3') => {
                         self.execute_close();
                     }
@@ -876,6 +994,64 @@ impl Dashboard {
                             4 => self.execute_new_vault(),
                             _ => {}
                         }
+                    }
+                    _ => {}
+                }
+            }
+            AppMode::AirdropClaimPopup => {
+                // Esc closes popup, A shows stats
+                match code {
+                    KeyCode::Char('a') | KeyCode::Char('A') => {
+                        self.mode = AppMode::AirdropStatsPopup;
+                        self.needs_clear = true;
+                    }
+                    KeyCode::Esc => {
+                        self.mode = AppMode::Normal;
+                        self.needs_clear = true;
+                    }
+                    _ => {}
+                }
+            }
+            AppMode::AirdropStatsPopup => {
+                // Esc closes, m/1/5/7/3/a changes timeframe
+                match code {
+                    KeyCode::Esc => {
+                        self.mode = AppMode::Normal;
+                        self.needs_clear = true;
+                    }
+                    KeyCode::Char('m') | KeyCode::Char('M') => {
+                        self.airdrop_timeframe = ChartTimeframe::FiveMinutes;
+                        self.status_message = Some("📊 Showing 5 minutes".to_string());
+                    }
+                    KeyCode::Char('1') => {
+                        self.airdrop_timeframe = ChartTimeframe::OneDay;
+                        self.status_message = Some("📊 Showing 1 day".to_string());
+                    }
+                    KeyCode::Char('5') => {
+                        self.airdrop_timeframe = ChartTimeframe::FiveDays;
+                        self.status_message = Some("📊 Showing 5 days".to_string());
+                    }
+                    KeyCode::Char('7') => {
+                        self.airdrop_timeframe = ChartTimeframe::OneWeek;
+                        self.status_message = Some("📊 Showing 1 week".to_string());
+                    }
+                    KeyCode::Char('3') => {
+                        self.airdrop_timeframe = ChartTimeframe::OneMonth;
+                        self.status_message = Some("📊 Showing 1 month".to_string());
+                    }
+                    KeyCode::Char('a') | KeyCode::Char('A') => {
+                        self.airdrop_timeframe = ChartTimeframe::All;
+                        self.status_message = Some("📊 Showing all data".to_string());
+                    }
+                    _ => {}
+                }
+            }
+            AppMode::LockPopup | AppMode::RegisterPopup => {
+                // Esc closes popup
+                match code {
+                    KeyCode::Esc => {
+                        self.mode = AppMode::Normal;
+                        self.needs_clear = true;
                     }
                     _ => {}
                 }
@@ -966,6 +1142,16 @@ impl Dashboard {
 
         self.status_message = Some("Executing Unlock...".to_string());
         self.pending_action = true;  // Set flag to execute on next loop
+    }
+
+    fn execute_claim_airdrop(&mut self) {
+        self.mode = AppMode::AirdropClaimPopup;
+        self.action_steps.clear();
+        self.needs_clear = true;  // Force terminal clear to prevent background artifacts
+        self.action_steps.push(ActionStep::Starting);
+        self.status_message = Some("Claiming Airdrop...".to_string());
+        // Execute immediately
+        self.perform_claim_airdrop_action();
     }
 
     fn execute_transfer(&mut self) {
@@ -1267,6 +1453,55 @@ impl Dashboard {
             Err(e) => {
                 self.action_steps.push(ActionStep::Error(format!("Lock failed: {}", e)));
                 self.status_message = Some("Lock failed!".to_string());
+            }
+        }
+    }
+
+    fn perform_claim_airdrop_action(&mut self) {
+        if !self.action_steps.is_empty() && !matches!(self.action_steps.last(), Some(ActionStep::Starting)) {
+            return; // Already executed
+        }
+
+        self.action_steps.clear();
+        self.action_steps.push(ActionStep::InProgress("Checking PQ account...".to_string()));
+
+        // Execute the airdrop claim (with output suppressed)
+        let keypair_path = self.keypair_path.to_str().unwrap();
+        let wallet = self.wallet;
+        let mint = self.mint;
+        let vault_client = &self.vault_client;
+        let keypair_path_str = keypair_path.to_string();
+
+        let result = suppress_output(|| {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    vault_client.claim_airdrop(wallet, &keypair_path_str, mint).await
+                })
+            })
+        });
+
+        match result {
+            Ok(_) => {
+                self.action_steps.push(ActionStep::Success("✓ Transaction confirmed!".to_string()));
+                self.action_steps.push(ActionStep::Success("✓ Claimed 100 QDUM successfully!".to_string()));
+                self.action_steps.push(ActionStep::Success("⏰ Next claim available in 24 hours".to_string()));
+                self.action_steps.push(ActionStep::InProgress("".to_string()));
+                self.action_steps.push(ActionStep::InProgress("Press [A] to view airdrop pool stats...".to_string()));
+                self.status_message = Some("Airdrop claimed!".to_string());
+                self.refresh_data();
+            }
+            Err(e) => {
+                let error_msg = format!("{}", e);
+                if error_msg.contains("CooldownNotElapsed") || error_msg.contains("Cooldown") {
+                    self.action_steps.push(ActionStep::Error("Cooldown period not elapsed - wait 24 hours between claims".to_string()));
+                } else if error_msg.contains("AirdropCapExceeded") || error_msg.contains("Cap exceeded") {
+                    self.action_steps.push(ActionStep::Error("Airdrop pool exhausted - 3% supply cap reached".to_string()));
+                } else if error_msg.contains("PQAccountNotInitialized") || error_msg.contains("not initialized") {
+                    self.action_steps.push(ActionStep::Error("PQ account not initialized - register first (press G)".to_string()));
+                } else {
+                    self.action_steps.push(ActionStep::Error(format!("Airdrop claim failed: {}", e)));
+                }
+                self.status_message = Some("Airdrop claim failed!".to_string());
             }
         }
     }
@@ -2234,6 +2469,8 @@ impl Dashboard {
             AppMode::RegisterPopup => self.render_action_popup(f, size, "REGISTER", Color::Green),
             AppMode::LockPopup => self.render_action_popup(f, size, "LOCK VAULT", Color::Red),
             AppMode::TransferPopup => self.render_transfer_popup(f, size),
+            AppMode::AirdropClaimPopup => self.render_action_popup(f, size, "CLAIM AIRDROP", Theme::CYAN_NEON),
+            AppMode::AirdropStatsPopup => self.render_airdrop_stats_popup(f, size),
             AppMode::VaultSwitchPopup => self.render_vault_switch_popup(f, size),
             AppMode::DeleteConfirmPopup => self.render_delete_confirm_popup(f, size),
             AppMode::CloseConfirmPopup => self.render_close_confirm_popup(f, size),
@@ -2336,8 +2573,10 @@ impl Dashboard {
             ("🔒 LOCK", "[L]", "Secure vault", Theme::RED),
             ("🔓 UNLOCK", "[U]", "Verify signature", Theme::YELLOW),
             ("💸 TRANSFER", "[T]", "Send tokens", Theme::CYAN),
+            ("🎁 AIRDROP", "[A]", "Claim 100 QDUM (24h cooldown)", Theme::CYAN_NEON),
+            ("📦 POOL", "[P]", "View airdrop pool stats", Theme::YELLOW_NEON),
             ("❌ CLOSE", "[X]", "Close & reclaim rent", Theme::RED_NEON),
-            ("📊 CHART", "[M]", "Lock history chart", Theme::CYAN_NEON),
+            ("📊 Network", "[M]", "Locked QDUM and Holder chart", Theme::CYAN_NEON),
             ("🗄️ VAULTS", "[V/N]", "Manage vaults", Theme::PURPLE),
         ];
 
@@ -2506,6 +2745,8 @@ impl Dashboard {
             Line::from(Span::styled("  L           - Lock vault", Style::default().fg(Theme::TEXT))),
             Line::from(Span::styled("  U           - Unlock vault", Style::default().fg(Theme::TEXT))),
             Line::from(Span::styled("  T or 2      - Transfer tokens", Style::default().fg(Theme::TEXT))),
+            Line::from(Span::styled("  A           - Claim 100 QDUM airdrop (24h cooldown)", Style::default().fg(Theme::TEXT))),
+            Line::from(Span::styled("  P           - View airdrop pool statistics", Style::default().fg(Theme::TEXT))),
             Line::from(Span::styled("  X or 3      - Close PQ account & reclaim rent", Style::default().fg(Theme::TEXT))),
             Line::from(Span::styled("  R           - Refresh status", Style::default().fg(Theme::TEXT))),
             Line::from(Span::styled("  C           - Copy wallet address", Style::default().fg(Theme::TEXT))),
@@ -3327,7 +3568,7 @@ impl Dashboard {
         use ratatui::symbols;
         use chrono::{DateTime, Utc, Duration as ChronoDuration};
 
-        let popup_area = centered_rect(85, 70, area);
+        let popup_area = centered_rect(98, 95, area);  // Full screen chart
 
         // Clear background
         f.render_widget(Clear, popup_area);
@@ -3364,11 +3605,19 @@ impl Dashboard {
         // Prepare data for chart with intelligent sampling
         const MAX_POINTS: usize = 150; // Limit chart points for performance and readability
 
+        // Extract the appropriate value based on chart type
+        let get_value = |entry: &LockHistoryEntry| -> f64 {
+            match self.chart_type {
+                ChartType::LockedAmount => entry.locked_amount,
+                ChartType::HolderCount => entry.holder_count as f64,
+            }
+        };
+
         let data_points: Vec<(f64, f64)> = if filtered_entries.len() <= MAX_POINTS {
             // If we have fewer entries than the max, use all of them
             filtered_entries.iter()
                 .enumerate()
-                .map(|(i, entry)| (i as f64, entry.locked_amount))
+                .map(|(i, entry)| (i as f64, get_value(entry)))
                 .collect()
         } else {
             // Sample data points evenly across the dataset
@@ -3377,7 +3626,7 @@ impl Dashboard {
                 .map(|i| {
                     let index = (i as f64 * step) as usize;
                     let entry = filtered_entries[index.min(filtered_entries.len() - 1)];
-                    (i as f64, entry.locked_amount)
+                    (i as f64, get_value(entry))
                 })
                 .collect()
         };
@@ -3425,8 +3674,9 @@ impl Dashboard {
                 .data(&data_points)
         ];
 
-        // Create chart with dynamic title showing current timeframe and data count
-        let chart_title = format!(" 📊 LOCKED QDUM [{} - {} points] ",
+        // Create chart with dynamic title showing chart type, timeframe, and data count
+        let chart_title = format!(" 📊 {} [{} - {} points] ",
+            self.chart_type.to_string(),
             self.chart_timeframe.to_string(),
             filtered_entries.len());
         let chart = ratatui::widgets::Chart::new(datasets)
@@ -3534,6 +3784,19 @@ impl Dashboard {
             ]),
             Line::from(""),  // Empty line for spacing
             Line::from(vec![
+                Span::styled("📊 Chart: ", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled("[TAB/←→] ", Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    if self.chart_type == ChartType::LockedAmount { "⟪ LOCKED QDUM ⟫" } else { "  LOCKED QDUM  " },
+                    Style::default().fg(if self.chart_type == ChartType::LockedAmount { Theme::CYAN_NEON } else { Theme::SUBTEXT1 }).add_modifier(Modifier::BOLD)
+                ),
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    if self.chart_type == ChartType::HolderCount { "⟪ LOCKED HOLDERS ⟫" } else { "  LOCKED HOLDERS  " },
+                    Style::default().fg(if self.chart_type == ChartType::HolderCount { Theme::CYAN_NEON } else { Theme::SUBTEXT1 }).add_modifier(Modifier::BOLD)
+                ),
+            ]),
+            Line::from(vec![
                 Span::styled("⌚ Timeframe: ", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD)),
                 Span::styled("[M] ", Style::default().fg(if self.chart_timeframe == ChartTimeframe::FiveMinutes { Theme::CYAN_NEON } else { Theme::SUBTEXT1 }).add_modifier(Modifier::BOLD)),
                 Span::styled("5M  ", Style::default().fg(Theme::SUBTEXT1)),
@@ -3570,6 +3833,275 @@ impl Dashboard {
             .alignment(ratatui::layout::Alignment::Center);
 
         f.render_widget(info_block, chunks[1]);
+    }
+
+    fn render_airdrop_stats_popup(&self, f: &mut Frame, area: Rect) {
+        // Full screen popup (98% x 95%)
+        let popup_area = centered_rect(98, 95, area);
+
+        // Clear background
+        f.render_widget(Clear, popup_area);
+
+        // Render background block to fill entire popup area
+        let background = Block::default()
+            .style(Style::default().bg(Theme::BASE));
+        f.render_widget(background, popup_area);
+
+        // Split layout: Title + Content
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3),  // Title
+                Constraint::Min(10),    // Content
+            ])
+            .split(popup_area);
+
+        // Title
+        let title = Paragraph::new("🎁 AIRDROP POOL STATISTICS")
+            .style(Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))
+            .alignment(Alignment::Center)
+            .block(Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Theme::CYAN_NEON))
+                .border_type(BorderType::Rounded)
+                .style(Style::default().bg(Theme::BASE)));
+        f.render_widget(title, chunks[0]);
+
+        // Use cached airdrop stats (fetched when entering popup mode)
+        let distributed = self.airdrop_distributed;
+        let remaining = self.airdrop_remaining;
+
+        const TOTAL_CAP: u64 = 128_849_018_880_000; // 3% cap with 6 decimals
+        let distributed_qdum = distributed as f64 / 1_000_000.0;
+        let remaining_qdum = remaining as f64 / 1_000_000.0;
+        let total_qdum = TOTAL_CAP as f64 / 1_000_000.0;
+        let percent_used = (distributed as f64 / TOTAL_CAP as f64 * 100.0);
+
+        // Content area - split into stats and visual
+        let content_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(12),  // Stats panel
+                Constraint::Min(10),     // Visual bar
+                Constraint::Length(3),   // Help text
+            ])
+            .split(chunks[1]);
+
+        // Stats panel
+        let stats_text = vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("📦 Total Airdrop Pool:  ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled(format!("{:.2} QDUM", total_qdum), Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled("  (3% of supply)", Style::default().fg(Theme::DIM)),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("✅ Distributed:         ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled(format!("{:.2} QDUM", distributed_qdum), Style::default().fg(Theme::GREEN_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("  ({:.3}%)", percent_used), Style::default().fg(Theme::GREEN)),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("💎 Remaining:           ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled(format!("{:.2} QDUM", remaining_qdum), Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("  ({:.3}%)", 100.0 - percent_used), Style::default().fg(Theme::YELLOW)),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("📊 Claims Possible:     ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled(format!("{:.0} more", remaining_qdum / 100.0), Style::default().fg(Theme::CYAN).add_modifier(Modifier::BOLD)),
+                Span::styled("  (@ 100 QDUM each)", Style::default().fg(Theme::DIM)),
+            ]),
+        ];
+
+        let stats = Paragraph::new(stats_text)
+            .block(Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Theme::CYAN))
+                .border_type(BorderType::Rounded)
+                .title(" Pool Status ")
+                .title_style(Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))
+                .style(Style::default().bg(Theme::PANEL_BG)))
+            .alignment(Alignment::Left);
+        f.render_widget(stats, content_chunks[0]);
+
+        // Load airdrop history and create chart showing remaining claims over time
+        use ratatui::widgets::{Dataset, GraphType};
+        use ratatui::symbols;
+        use chrono::{DateTime, Utc};
+
+        let history = AirdropHistory::load().unwrap_or_else(|_| AirdropHistory { entries: Vec::new() });
+
+        // Filter entries based on selected timeframe
+        let filtered_entries: Vec<&AirdropHistoryEntry> = if let Some(duration) = self.airdrop_timeframe.to_duration() {
+            let cutoff = Utc::now() - duration;
+            history.entries.iter()
+                .filter(|entry| {
+                    DateTime::parse_from_rfc3339(&entry.timestamp)
+                        .ok()
+                        .map(|dt| dt.with_timezone(&Utc) > cutoff)
+                        .unwrap_or(false)
+                })
+                .collect()
+        } else {
+            history.entries.iter().collect()
+        };
+
+        // Prepare data for chart with intelligent sampling
+        const MAX_POINTS: usize = 150; // Limit chart points for performance and readability
+
+        let data_points: Vec<(f64, f64)> = if filtered_entries.is_empty() {
+            // No history, show current point
+            vec![(0.0, remaining_qdum)]
+        } else if filtered_entries.len() <= MAX_POINTS {
+            // If we have fewer entries than the max, use all of them
+            filtered_entries.iter()
+                .enumerate()
+                .map(|(i, entry)| (i as f64, entry.remaining))
+                .collect()
+        } else {
+            // Sample data points evenly across the dataset
+            let step = filtered_entries.len() as f64 / MAX_POINTS as f64;
+            (0..MAX_POINTS)
+                .map(|i| {
+                    let index = (i as f64 * step) as usize;
+                    let entry = filtered_entries[index.min(filtered_entries.len() - 1)];
+                    (i as f64, entry.remaining)
+                })
+                .collect()
+        };
+
+        // Parse timestamps for better labeling
+        let (first_time, last_time) = if !filtered_entries.is_empty() {
+            let first = filtered_entries.first().and_then(|e| DateTime::parse_from_rfc3339(&e.timestamp).ok());
+            let last = filtered_entries.last().and_then(|e| DateTime::parse_from_rfc3339(&e.timestamp).ok());
+            (first, last)
+        } else {
+            (None, None)
+        };
+
+        // Calculate dynamic Y-axis bounds with padding for better visualization
+        let (y_min, y_max) = if data_points.is_empty() {
+            (0.0, 100.0)  // Default range if no data
+        } else {
+            let values: Vec<f64> = data_points.iter().map(|(_, y)| *y).collect();
+            let min_val = values.iter().cloned().fold(f64::INFINITY, f64::min);
+            let max_val = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+
+            // Add 20% padding above and below the data range
+            let range = max_val - min_val;
+            let padding = if range > 0.0 { range * 0.2 } else { max_val * 0.2 };
+
+            let padded_min = (min_val - padding).max(0.0);  // Don't go below 0
+            let padded_max = max_val + padding;
+
+            // Ensure minimum range for readability
+            if (padded_max - padded_min) < 100.0 {
+                let mid = (padded_max + padded_min) / 2.0;
+                (mid - 50.0, mid + 50.0)
+            } else {
+                (padded_min, padded_max)
+            }
+        };
+
+        let datasets = vec![
+            Dataset::default()
+                .name("Remaining Claims")
+                .marker(symbols::Marker::Braille)
+                .graph_type(GraphType::Line)
+                .style(Style::default().fg(Theme::YELLOW_NEON))
+                .data(&data_points)
+        ];
+
+        let chart = ratatui::widgets::Chart::new(datasets)
+            .block(
+                Block::default()
+                    .title(format!(" 📉 Airdrop Pool Depletion [{} - {} snapshots] ",
+                        self.airdrop_timeframe.to_string(),
+                        filtered_entries.len()))
+                    .title_style(Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Theme::CYAN))
+                    .border_type(BorderType::Rounded)
+                    .style(Style::default().bg(Theme::PANEL_BG)),
+            )
+            .x_axis(
+                ratatui::widgets::Axis::default()
+                    .title("Time →")
+                    .style(Style::default().fg(Theme::SUBTEXT1))
+                    .bounds([0.0, data_points.len().max(10) as f64])
+                    .labels({
+                        // Create time-based labels
+                        let start_label = if let Some(first) = first_time {
+                            format!("{}", first.format("%m/%d %H:%M"))
+                        } else {
+                            "Start".to_string()
+                        };
+
+                        let end_label = if let Some(last) = last_time {
+                            format!("{}", last.format("%m/%d %H:%M"))
+                        } else {
+                            "Now".to_string()
+                        };
+
+                        // Calculate middle timestamp
+                        let mid_label = if let (Some(first), Some(last)) = (first_time, last_time) {
+                            let duration = last.signed_duration_since(first);
+                            let mid_time = first + duration / 2;
+                            format!("{}", mid_time.format("%m/%d"))
+                        } else {
+                            "".to_string()
+                        };
+
+                        vec![
+                            Span::styled(start_label, Style::default().fg(Theme::SUBTEXT1)),
+                            Span::styled(mid_label, Style::default().fg(Theme::SUBTEXT1)),
+                            Span::styled(end_label, Style::default().fg(Theme::SUBTEXT1)),
+                        ]
+                    })
+            )
+            .y_axis(
+                ratatui::widgets::Axis::default()
+                    .title("Remaining QDUM")
+                    .style(Style::default().fg(Theme::SUBTEXT1))
+                    .bounds([y_min, y_max])
+                    .labels(vec![
+                        Span::styled(format!("{:.0}", y_min), Style::default().fg(Theme::SUBTEXT1)),
+                        Span::styled(format!("{:.0}", (y_min + y_max) / 2.0), Style::default().fg(Theme::SUBTEXT1)),
+                        Span::styled(format!("{:.0}", y_max), Style::default().fg(Theme::SUBTEXT1)),
+                    ])
+            );
+
+        f.render_widget(chart, content_chunks[1]);
+
+        // Help text
+        let help_text = vec![
+            Line::from(vec![
+                Span::styled("[Esc] ", Style::default().fg(Theme::RED_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled("Close  ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("[M] ", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled("5Min  ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("[1] ", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled("1D  ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("[5] ", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled("5D  ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("[7] ", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled("1W  ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("[3] ", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled("1M  ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("[A] ", Style::default().fg(Theme::GREEN_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled("All", Style::default().fg(Theme::SUBTEXT1)),
+            ]),
+        ];
+        let help = Paragraph::new(help_text)
+            .alignment(Alignment::Center)
+            .block(Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Theme::DIM))
+                .border_type(BorderType::Rounded)
+                .style(Style::default().bg(Theme::PANEL_BG)));
+        f.render_widget(help, content_chunks[2]);
     }
 
     fn render_delete_confirm_popup(&self, f: &mut Frame, area: Rect) {
