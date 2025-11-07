@@ -10,22 +10,22 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, BorderType, Clear, List, ListItem, Paragraph, Row, Table, Wrap},
+    widgets::{Block, Borders, BorderType, Clear, Paragraph, Row, Table, Wrap},
     Frame, Terminal,
 };
 use solana_sdk::pubkey::Pubkey;
 use std::io::{self, Write as _};
 use std::path::PathBuf;
-use std::fs::OpenOptions;
+use std::fs::{self, OpenOptions};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
 
 use crate::crypto::sphincs::SphincsKeyManager;
 use crate::solana::client::VaultClient;
 use crate::icons::Icons;
 use crate::theme::Theme;
+use crate::vault_manager::VaultConfig;
 
 /// Helper function to suppress stdout/stderr during operation
 /// This prevents CLI output from glitching behind the TUI
@@ -81,6 +81,10 @@ enum AppMode {
     LockPopup,
     UnlockPopup,
     TransferPopup,
+    VaultSwitchPopup,
+    DeleteConfirmPopup,
+    CloseConfirmPopup,
+    ChartPopup,
     ResultPopup,
 }
 
@@ -88,6 +92,47 @@ enum AppMode {
 enum TransferInputField {
     Recipient,
     Amount,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum VaultManagementMode {
+    List,      // Showing list of vaults
+    Create,    // Creating new vault
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ChartTimeframe {
+    FiveMinutes,
+    OneDay,
+    FiveDays,
+    OneWeek,
+    OneMonth,
+    All,
+}
+
+impl ChartTimeframe {
+    fn to_string(&self) -> &str {
+        match self {
+            ChartTimeframe::FiveMinutes => "5M",
+            ChartTimeframe::OneDay => "1D",
+            ChartTimeframe::FiveDays => "5D",
+            ChartTimeframe::OneWeek => "1W",
+            ChartTimeframe::OneMonth => "1M",
+            ChartTimeframe::All => "ALL",
+        }
+    }
+
+    fn to_duration(&self) -> Option<chrono::Duration> {
+        use chrono::Duration as ChronoDuration;
+        match self {
+            ChartTimeframe::FiveMinutes => Some(ChronoDuration::minutes(5)),
+            ChartTimeframe::OneDay => Some(ChronoDuration::days(1)),
+            ChartTimeframe::FiveDays => Some(ChronoDuration::days(5)),
+            ChartTimeframe::OneWeek => Some(ChronoDuration::days(7)),
+            ChartTimeframe::OneMonth => Some(ChronoDuration::days(30)),
+            ChartTimeframe::All => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -101,6 +146,8 @@ enum ActionStep {
 pub struct Dashboard {
     wallet: Pubkey,
     keypair_path: PathBuf,
+    sphincs_public_key_path: String,
+    sphincs_private_key_path: String,
     rpc_url: String,
     program_id: Pubkey,
     mint: Pubkey,
@@ -126,9 +173,23 @@ pub struct Dashboard {
     transfer_recipient: String,
     transfer_amount: String,
     transfer_focused_field: TransferInputField,
+    // New vault state
+    new_vault_name: String,
+    // Vault management state
+    vault_management_mode: VaultManagementMode,
+    vault_list: Vec<crate::vault_manager::VaultProfile>,
+    selected_vault_index: usize,
+    // Delete confirmation state
+    vault_to_delete: String,
+    delete_confirmation_input: String,
+    // Close confirmation state
+    vault_to_close: String,
+    close_confirmation_input: String,
     // Animation state
     animation_frame: u8,  // Counter for animation frames
     last_animation_update: std::time::Instant,
+    // Chart state
+    chart_timeframe: ChartTimeframe,
 }
 
 #[derive(Clone)]
@@ -137,10 +198,65 @@ struct VaultStatus {
     pda: Option<Pubkey>,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct LockHistoryEntry {
+    timestamp: String,      // ISO 8601 format
+    locked_amount: f64,     // Total amount of QDUM locked network-wide
+    holder_count: usize,    // Number of addresses with locked tokens
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct LockHistory {
+    entries: Vec<LockHistoryEntry>,
+}
+
+impl LockHistory {
+    fn load() -> Result<Self> {
+        let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?;
+        let history_path = home.join(".qdum").join("network_lock_history.json");
+
+        if history_path.exists() {
+            let contents = std::fs::read_to_string(&history_path)?;
+            let history: LockHistory = serde_json::from_str(&contents)?;
+            Ok(history)
+        } else {
+            Ok(LockHistory { entries: Vec::new() })
+        }
+    }
+
+    fn save(&self) -> Result<()> {
+        let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?;
+        let vault_dir = home.join(".qdum");
+        std::fs::create_dir_all(&vault_dir)?;
+
+        let history_path = vault_dir.join("network_lock_history.json");
+        let contents = serde_json::to_string_pretty(self)?;
+        std::fs::write(&history_path, contents)?;
+        Ok(())
+    }
+
+    fn add_entry(&mut self, locked_amount: f64, holder_count: usize) {
+        use chrono::Utc;
+        let entry = LockHistoryEntry {
+            timestamp: Utc::now().to_rfc3339(),
+            locked_amount,
+            holder_count,
+        };
+        self.entries.push(entry);
+
+        // Keep only last 30 days of entries (hourly snapshots)
+        if self.entries.len() > 720 {  // 30 days * 24 hours = 720 entries
+            self.entries.remove(0);
+        }
+    }
+}
+
 impl Dashboard {
     pub fn new(
         wallet: Pubkey,
         keypair_path: PathBuf,
+        sphincs_public_key_path: String,
+        sphincs_private_key_path: String,
         rpc_url: String,
         program_id: Pubkey,
         mint: Pubkey,
@@ -150,6 +266,8 @@ impl Dashboard {
         Ok(Self {
             wallet,
             keypair_path,
+            sphincs_public_key_path,
+            sphincs_private_key_path,
             rpc_url,
             program_id,
             mint,
@@ -174,8 +292,17 @@ impl Dashboard {
             transfer_recipient: String::new(),
             transfer_amount: String::new(),
             transfer_focused_field: TransferInputField::Recipient,
+            new_vault_name: String::new(),
+            vault_management_mode: VaultManagementMode::List,
+            vault_list: Vec::new(),
+            selected_vault_index: 0,
+            vault_to_delete: String::new(),
+            delete_confirmation_input: String::new(),
+            vault_to_close: String::new(),
+            close_confirmation_input: String::new(),
             animation_frame: 0,
             last_animation_update: std::time::Instant::now(),
+            chart_timeframe: ChartTimeframe::All,
         })
     }
 
@@ -371,8 +498,6 @@ impl Dashboard {
                         if let Some(ref mut f) = log {
                             let _ = writeln!(f, "  -> Processing KeyPress: {:?}", key.code);
                         }
-                        // Debug: show what key was pressed
-                        self.status_message = Some(format!("DEBUG: Key={:?} Mods={:?}", key.code, key.modifiers));
                         self.handle_key_event(key.code, key.modifiers);
                     }
                 }
@@ -403,6 +528,65 @@ impl Dashboard {
                 // Any key exits help mode
                 self.mode = AppMode::Normal;
                 self.status_message = None;
+            }
+            AppMode::ChartPopup => {
+                // Esc closes chart popup, R refreshes data, L shows log, m/1/5/7/3/a changes timeframe
+                match code {
+                    KeyCode::Esc => {
+                        self.mode = AppMode::Normal;
+                        self.status_message = None;
+                        self.needs_clear = true;
+                    }
+                    KeyCode::Char('m') | KeyCode::Char('M') => {
+                        self.chart_timeframe = ChartTimeframe::FiveMinutes;
+                        self.status_message = Some("📊 Showing 5 minutes".to_string());
+                    }
+                    KeyCode::Char('1') => {
+                        self.chart_timeframe = ChartTimeframe::OneDay;
+                        self.status_message = Some("📊 Showing 1 day".to_string());
+                    }
+                    KeyCode::Char('5') => {
+                        self.chart_timeframe = ChartTimeframe::FiveDays;
+                        self.status_message = Some("📊 Showing 5 days".to_string());
+                    }
+                    KeyCode::Char('7') => {
+                        self.chart_timeframe = ChartTimeframe::OneWeek;
+                        self.status_message = Some("📊 Showing 1 week".to_string());
+                    }
+                    KeyCode::Char('3') => {
+                        self.chart_timeframe = ChartTimeframe::OneMonth;
+                        self.status_message = Some("📊 Showing 1 month".to_string());
+                    }
+                    KeyCode::Char('a') | KeyCode::Char('A') => {
+                        self.chart_timeframe = ChartTimeframe::All;
+                        self.status_message = Some("📊 Showing all data".to_string());
+                    }
+                    KeyCode::Char('r') | KeyCode::Char('R') => {
+                        // Refresh network data (force bypass cache)
+                        let _ = self.record_lock_history(true);
+                        // Status message is set by record_lock_history
+                    }
+                    KeyCode::Char('l') | KeyCode::Char('L') => {
+                        // Show network query log
+                        self.action_steps.clear();
+                        self.action_steps.push(ActionStep::InProgress("📋 Network Query Log:".to_string()));
+                        self.action_steps.push(ActionStep::InProgress("".to_string()));
+
+                        if let Ok(log_content) = std::fs::read_to_string("/tmp/qdum-network-query.log") {
+                            for line in log_content.lines().take(30) {
+                                self.action_steps.push(ActionStep::InProgress(line.to_string()));
+                            }
+                        } else {
+                            self.action_steps.push(ActionStep::Error("Failed to read log file".to_string()));
+                        }
+
+                        self.action_steps.push(ActionStep::InProgress("".to_string()));
+                        self.action_steps.push(ActionStep::InProgress("Press [Esc] to close".to_string()));
+                        self.mode = AppMode::ResultPopup;
+                        self.needs_clear = true;
+                    }
+                    _ => {}
+                }
             }
             AppMode::RegisterPopup | AppMode::LockPopup | AppMode::UnlockPopup | AppMode::ResultPopup => {
                 // In action popups, only Esc closes (actions auto-execute)
@@ -474,6 +658,167 @@ impl Dashboard {
                     _ => {}
                 }
             }
+            AppMode::DeleteConfirmPopup => {
+                // Handle delete confirmation input
+                match code {
+                    KeyCode::Esc => {
+                        self.mode = AppMode::VaultSwitchPopup;
+                        self.vault_to_delete.clear();
+                        self.delete_confirmation_input.clear();
+                        self.status_message = Some("Delete cancelled".to_string());
+                        self.needs_clear = true;
+                    }
+                    KeyCode::Char(c) => {
+                        self.delete_confirmation_input.push(c);
+                    }
+                    KeyCode::Backspace => {
+                        self.delete_confirmation_input.pop();
+                    }
+                    KeyCode::Enter => {
+                        // Check if typed name matches
+                        if self.delete_confirmation_input == self.vault_to_delete {
+                            let vault_name = self.vault_to_delete.clone();
+                            self.perform_vault_delete(&vault_name);
+                        } else {
+                            self.mode = AppMode::VaultSwitchPopup;
+                            self.status_message = Some("❌ Vault name did not match - delete cancelled".to_string());
+                            self.delete_confirmation_input.clear();
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            AppMode::CloseConfirmPopup => {
+                // Handle close confirmation input
+                match code {
+                    KeyCode::Esc => {
+                        self.mode = AppMode::Normal;
+                        self.vault_to_close.clear();
+                        self.close_confirmation_input.clear();
+                        self.status_message = Some("Close cancelled".to_string());
+                        self.needs_clear = true;
+                    }
+                    KeyCode::Char(c) => {
+                        self.close_confirmation_input.push(c);
+                    }
+                    KeyCode::Backspace => {
+                        self.close_confirmation_input.pop();
+                    }
+                    KeyCode::Enter => {
+                        // Check if typed name matches
+                        if self.close_confirmation_input == self.vault_to_close {
+                            self.perform_close();
+                        } else {
+                            self.mode = AppMode::Normal;
+                            self.status_message = Some("❌ Vault name did not match - close cancelled".to_string());
+                            self.close_confirmation_input.clear();
+                            self.needs_clear = true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            AppMode::VaultSwitchPopup => {
+                let _ = std::fs::write("/tmp/vault-mode-check.log",
+                    format!("In VaultSwitchPopup mode, management_mode={:?}, keycode={:?}\n",
+                        self.vault_management_mode, code));
+
+                match self.vault_management_mode {
+                    VaultManagementMode::List => {
+                        // Handle vault list navigation and selection
+                        match code {
+                            KeyCode::Esc => {
+                                self.mode = AppMode::Normal;
+                                self.vault_list.clear();
+                                self.status_message = Some("Cancelled".to_string());
+                                self.needs_clear = true;
+                            }
+                            KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('K') => {
+                                if self.selected_vault_index > 0 {
+                                    self.selected_vault_index -= 1;
+                                }
+                            }
+                            KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J') => {
+                                // +1 for "Create New" option
+                                let max_index = self.vault_list.len();
+                                if self.selected_vault_index < max_index {
+                                    self.selected_vault_index += 1;
+                                }
+                            }
+                            KeyCode::Char('n') | KeyCode::Char('N') => {
+                                // Switch to create mode
+                                self.vault_management_mode = VaultManagementMode::Create;
+                                self.new_vault_name.clear();
+                                self.status_message = Some("Enter vault name...".to_string());
+                            }
+                            KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Delete => {
+                                // Show delete confirmation popup (if not "Create New" option)
+                                if self.selected_vault_index < self.vault_list.len() {
+                                    let selected_vault = &self.vault_list[self.selected_vault_index];
+                                    self.vault_to_delete = selected_vault.name.clone();
+                                    self.delete_confirmation_input.clear();
+                                    self.mode = AppMode::DeleteConfirmPopup;
+                                    self.status_message = Some(format!("Type '{}' to confirm deletion", selected_vault.name));
+                                }
+                            }
+                            KeyCode::Enter => {
+                                use std::io::Write;
+                                let _ = std::fs::write("/tmp/vault-enter-pressed.log",
+                                    format!("Enter pressed! selected_index={}, vault_list_len={}\n",
+                                        self.selected_vault_index, self.vault_list.len()));
+
+                                // If "Create New" is selected (last item)
+                                if self.selected_vault_index == self.vault_list.len() {
+                                    let _ = std::fs::OpenOptions::new().append(true).open("/tmp/vault-enter-pressed.log")
+                                        .and_then(|mut f| writeln!(f, "Create New selected"));
+                                    self.vault_management_mode = VaultManagementMode::Create;
+                                    self.new_vault_name.clear();
+                                    self.status_message = Some("Enter vault name...".to_string());
+                                } else if self.selected_vault_index < self.vault_list.len() {
+                                    let _ = std::fs::OpenOptions::new().append(true).open("/tmp/vault-enter-pressed.log")
+                                        .and_then(|mut f| writeln!(f, "Vault switch selected, index={}", self.selected_vault_index));
+                                    // Switch to selected vault
+                                    let selected_vault = &self.vault_list[self.selected_vault_index];
+                                    let _ = std::fs::OpenOptions::new().append(true).open("/tmp/vault-enter-pressed.log")
+                                        .and_then(|mut f| writeln!(f, "About to switch to vault: {}", selected_vault.name));
+                                    self.perform_vault_switch(&selected_vault.name.clone());
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    VaultManagementMode::Create => {
+                        // Handle vault creation input
+                        match code {
+                            KeyCode::Esc => {
+                                // Go back to list mode
+                                self.vault_management_mode = VaultManagementMode::List;
+                                self.new_vault_name.clear();
+                                self.status_message = Some("Select vault or create new...".to_string());
+                            }
+                            KeyCode::Char(c) => {
+                                // Allow alphanumeric, dash, underscore
+                                if c.is_alphanumeric() || c == '-' || c == '_' {
+                                    self.new_vault_name.push(c);
+                                }
+                            }
+                            KeyCode::Backspace => {
+                                self.new_vault_name.pop();
+                            }
+                            KeyCode::Enter => {
+                                // Validate and create vault
+                                if self.new_vault_name.is_empty() {
+                                    self.status_message = Some("❌ Vault name cannot be empty".to_string());
+                                } else {
+                                    // Perform vault creation
+                                    self.perform_new_vault_action();
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
             AppMode::Normal => {
                 // Clear unlock success message on any keypress
                 self.unlock_success_message = None;
@@ -500,8 +845,17 @@ impl Dashboard {
                     KeyCode::Char('t') | KeyCode::Char('T') | KeyCode::Char('2') => {
                         self.execute_transfer();
                     }
+                    KeyCode::Char('x') | KeyCode::Char('X') | KeyCode::Char('3') => {
+                        self.execute_close();
+                    }
+                    KeyCode::Char('m') | KeyCode::Char('M') => {
+                        self.execute_chart();
+                    }
                     KeyCode::Char('c') | KeyCode::Char('C') => {
                         self.copy_wallet_to_clipboard();
+                    }
+                    KeyCode::Char('v') | KeyCode::Char('V') | KeyCode::Char('n') | KeyCode::Char('N') => {
+                        self.execute_new_vault();
                     }
                     KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('K') => {
                         if self.selected_action > 0 {
@@ -509,7 +863,7 @@ impl Dashboard {
                         }
                     }
                     KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J') => {
-                        if self.selected_action < 3 {
+                        if self.selected_action < 4 {
                             self.selected_action += 1;
                         }
                     }
@@ -519,6 +873,7 @@ impl Dashboard {
                             1 => self.execute_lock(),
                             2 => self.execute_unlock(),
                             3 => self.execute_transfer(),
+                            4 => self.execute_new_vault(),
                             _ => {}
                         }
                     }
@@ -622,6 +977,118 @@ impl Dashboard {
         self.status_message = Some("Enter transfer details...".to_string());
     }
 
+    fn execute_close(&mut self) {
+        // Check if vault is locked before allowing close
+        if let Some(ref status) = self.vault_status {
+            if status.is_locked {
+                self.mode = AppMode::ResultPopup;
+                self.action_steps.clear();
+                self.action_steps.push(ActionStep::Error("❌ Cannot close PQ account while locked!".to_string()));
+                self.action_steps.push(ActionStep::Error("You must unlock your vault first.".to_string()));
+                self.action_steps.push(ActionStep::InProgress("".to_string()));
+                self.action_steps.push(ActionStep::InProgress("Press [Esc] to close this message".to_string()));
+                self.needs_clear = true;
+                return;
+            }
+        }
+
+        // Get active vault name
+        let vault_name = match VaultConfig::load() {
+            Ok(config) => {
+                if let Some(active) = config.active_vault {
+                    active
+                } else {
+                    self.status_message = Some("❌ No active vault".to_string());
+                    return;
+                }
+            }
+            Err(e) => {
+                self.status_message = Some(format!("❌ Failed to load config: {}", e));
+                return;
+            }
+        };
+
+        // Show confirmation popup
+        self.vault_to_close = vault_name;
+        self.close_confirmation_input.clear();
+        self.mode = AppMode::CloseConfirmPopup;
+        self.needs_clear = true;
+        self.status_message = Some("Type vault name to confirm close".to_string());
+    }
+
+    fn record_lock_history(&mut self, force_refresh: bool) -> Result<(f64, usize)> {
+        // Query network-wide locked tokens
+        let mint = self.mint;
+        let vault_client = &self.vault_client;
+
+        self.status_message = Some("🔍 Querying network for locked tokens...".to_string());
+
+        // Get total locked QDUM across all holders
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                vault_client.get_network_locked_total(mint, force_refresh).await
+            })
+        });
+
+        match result {
+            Ok((total_locked, holder_count)) => {
+
+                // Load history, add entry, and save
+                if let Ok(mut history) = LockHistory::load() {
+                    history.add_entry(total_locked, holder_count);
+                    if let Err(e) = history.save() {
+                        self.status_message = Some(format!("⚠️  Failed to save history: {}", e));
+                        return Err(e);
+                    }
+                }
+
+                self.status_message = Some(format!("✅ Recorded: {:.2} QDUM locked ({} holders)", total_locked, holder_count));
+                Ok((total_locked, holder_count))
+            }
+            Err(e) => {
+                self.status_message = Some(format!("❌ Failed to query network: {}", e));
+                Err(e)
+            }
+        }
+    }
+
+    fn execute_chart(&mut self) {
+        // Record current lock status before showing chart (use cache if available)
+        let _ = self.record_lock_history(false);
+
+        // Show chart popup
+        self.mode = AppMode::ChartPopup;
+        self.needs_clear = true;
+    }
+
+    fn execute_new_vault(&mut self) {
+        self.mode = AppMode::VaultSwitchPopup;
+        self.needs_clear = true;  // Force terminal clear to prevent background artifacts
+        self.action_steps.clear();
+        self.new_vault_name.clear();
+
+        // Load vault list
+        if let Ok(config) = VaultConfig::load() {
+            self.vault_list = config.list_vaults().into_iter().cloned().collect();
+
+            // Find active vault and select it
+            if let Some(active_name) = &config.active_vault {
+                for (i, vault) in self.vault_list.iter().enumerate() {
+                    if &vault.name == active_name {
+                        self.selected_vault_index = i;
+                        break;
+                    }
+                }
+            }
+        } else {
+            self.vault_list = Vec::new();
+        }
+
+        // Start in list mode
+        self.vault_management_mode = VaultManagementMode::List;
+        self.status_message = Some("Select vault or create new...".to_string());
+    }
+
     fn validate_transfer_inputs(&mut self) -> bool {
         // Validate recipient
         if self.transfer_recipient.is_empty() {
@@ -675,6 +1142,43 @@ impl Dashboard {
         }
 
         self.action_steps.clear();
+
+        // Check SOL balance first
+        self.action_steps.push(ActionStep::InProgress("Checking wallet balance...".to_string()));
+
+        let vault_client = &self.vault_client;
+        let wallet = self.wallet;
+
+        let sol_balance = suppress_output(|| {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    vault_client.get_sol_balance(wallet).await
+                })
+            })
+        });
+
+        match sol_balance {
+            Ok(balance) => {
+                if balance < 100_000_000 { // 0.1 SOL minimum
+                    self.action_steps.push(ActionStep::Error(format!("Insufficient SOL balance: {} SOL", balance as f64 / 1_000_000_000.0)));
+                    self.action_steps.push(ActionStep::InProgress("".to_string()));
+                    self.action_steps.push(ActionStep::InProgress("To fund this wallet:".to_string()));
+                    self.action_steps.push(ActionStep::InProgress("  1. Visit: https://faucet.solana.com".to_string()));
+                    self.action_steps.push(ActionStep::InProgress(format!("  2. Paste wallet: {}", wallet)));
+                    self.action_steps.push(ActionStep::InProgress("  3. Request devnet SOL (airdrop)".to_string()));
+                    self.action_steps.push(ActionStep::InProgress("  4. Wait ~30 seconds".to_string()));
+                    self.action_steps.push(ActionStep::InProgress("  5. Press R to refresh and try again".to_string()));
+                    self.status_message = Some("❌ Insufficient SOL! Fund wallet first.".to_string());
+                    return;
+                }
+                self.action_steps.push(ActionStep::Success(format!("✓ Wallet funded: {} SOL", balance as f64 / 1_000_000_000.0)));
+            }
+            Err(_) => {
+                // Continue anyway - might be RPC issue
+                self.action_steps.push(ActionStep::InProgress("⚠ Could not verify balance, continuing...".to_string()));
+            }
+        }
+
         self.action_steps.push(ActionStep::InProgress("Loading SPHINCS+ public key...".to_string()));
 
         // Load SPHINCS+ public key
@@ -793,6 +1297,8 @@ impl Dashboard {
 
         // Spawn unlock operation as a tokio task - DO ALL WORK IN BACKGROUND
         let keypair_path_str = self.keypair_path.to_str().unwrap().to_string();
+        let sphincs_public_key_path = self.sphincs_public_key_path.clone();
+        let sphincs_private_key_path = self.sphincs_private_key_path.clone();
         let wallet = self.wallet;
         let rpc_url = self.rpc_url.clone();
         let program_id = self.program_id;
@@ -846,11 +1352,26 @@ impl Dashboard {
                 }
             };
 
-            let sphincs_privkey = match key_manager.load_private_key(None) {
+            let sphincs_privkey = match key_manager.load_private_key(Some(sphincs_private_key_path.clone())) {
                 Ok(pk) => pk,
                 Err(e) => {
                     let mut state = progress_clone.lock().unwrap();
-                    *state = (0, 46, format!("Failed to load key: {}", e));
+                    *state = (0, 46, format!("Failed to load private key: {}", e));
+                    unsafe {
+                        libc::dup2(original_stdout, 1);
+                        libc::dup2(original_stderr, 2);
+                        libc::close(original_stdout);
+                        libc::close(original_stderr);
+                    }
+                    return;
+                }
+            };
+
+            let sphincs_pubkey = match key_manager.load_public_key(Some(sphincs_public_key_path)) {
+                Ok(pk) => pk,
+                Err(e) => {
+                    let mut state = progress_clone.lock().unwrap();
+                    *state = (0, 46, format!("Failed to load public key: {}", e));
                     unsafe {
                         libc::dup2(original_stdout, 1);
                         libc::dup2(original_stderr, 2);
@@ -902,6 +1423,7 @@ impl Dashboard {
                 wallet,
                 &keypair_path_str,
                 &sphincs_privkey,
+                &sphincs_pubkey,
                 progress_callback,
             ).await;
 
@@ -1098,6 +1620,432 @@ impl Dashboard {
         }
     }
 
+    fn perform_vault_switch(&mut self, vault_name: &str) {
+        use std::path::PathBuf;
+        use solana_sdk::signature::{read_keypair_file, Signer};
+        use std::io::Write;
+
+        // Debug log
+        let _ = std::fs::write("/tmp/vault-switch-debug.log", format!("Starting vault switch to: {}\n", vault_name));
+
+        // Load config and switch vault
+        match VaultConfig::load() {
+            Ok(mut config) => {
+                match config.switch_vault(vault_name) {
+                    Ok(_) => {
+                        let _ = std::fs::OpenOptions::new().append(true).open("/tmp/vault-switch-debug.log")
+                            .and_then(|mut f| writeln!(f, "Switch successful, getting active vault"));
+
+                        // Get the newly active vault
+                        if let Some(vault) = config.get_active_vault() {
+                            let _ = std::fs::OpenOptions::new().append(true).open("/tmp/vault-switch-debug.log")
+                                .and_then(|mut f| writeln!(f, "Active vault: {}, keypair: {}", vault.name, vault.solana_keypair_path));
+
+                            // Load the keypair to extract the wallet address
+                            match read_keypair_file(&vault.solana_keypair_path) {
+                                Ok(keypair) => {
+                                    let _ = std::fs::OpenOptions::new().append(true).open("/tmp/vault-switch-debug.log")
+                                        .and_then(|mut f| writeln!(f, "Keypair loaded successfully, pubkey: {}", keypair.pubkey()));
+
+                                    // Update all vault-specific state
+                                    self.wallet = keypair.pubkey();
+                                    self.keypair_path = PathBuf::from(&vault.solana_keypair_path);
+                                    self.sphincs_public_key_path = vault.sphincs_public_key_path.clone();
+                                    self.sphincs_private_key_path = vault.sphincs_private_key_path.clone();
+
+                                    // Close vault management popup
+                                    self.mode = AppMode::Normal;
+                                    self.vault_list.clear();
+
+                                    // Show success message
+                                    self.status_message = Some(format!("✅ Switched to vault '{}' - Wallet: {}",
+                                        vault_name,
+                                        self.wallet.to_string().chars().take(8).collect::<String>() + "..."
+                                    ));
+
+                                    let _ = std::fs::OpenOptions::new().append(true).open("/tmp/vault-switch-debug.log")
+                                        .and_then(|mut f| writeln!(f, "About to refresh data"));
+
+                                    // Refresh all data with new vault
+                                    self.refresh_data();
+
+                                    let _ = std::fs::OpenOptions::new().append(true).open("/tmp/vault-switch-debug.log")
+                                        .and_then(|mut f| writeln!(f, "Refresh complete, should stay in dashboard"));
+                                }
+                                Err(e) => {
+                                    self.action_steps.clear();
+                                    self.action_steps.push(ActionStep::Error(format!("Failed to load keypair: {}", e)));
+                                    self.status_message = Some("❌ Failed to load vault keypair".to_string());
+                                    self.mode = AppMode::ResultPopup;
+                                    self.vault_list.clear();
+                                }
+                            }
+                        } else {
+                            self.action_steps.clear();
+                            self.action_steps.push(ActionStep::Error("No active vault after switch".to_string()));
+                            self.status_message = Some("❌ Failed to load new vault".to_string());
+                            self.mode = AppMode::ResultPopup;
+                            self.vault_list.clear();
+                        }
+                    }
+                    Err(e) => {
+                        self.action_steps.clear();
+                        self.action_steps.push(ActionStep::Error(format!("Failed to switch vault: {}", e)));
+                        self.status_message = Some("❌ Failed to switch vault".to_string());
+                        self.mode = AppMode::ResultPopup;
+                        self.vault_list.clear();
+                    }
+                }
+            }
+            Err(e) => {
+                self.action_steps.clear();
+                self.action_steps.push(ActionStep::Error(format!("Failed to load config: {}", e)));
+                self.status_message = Some("❌ Failed to load vault config".to_string());
+                self.mode = AppMode::ResultPopup;
+                self.vault_list.clear();
+            }
+        }
+    }
+
+    fn perform_vault_delete(&mut self, vault_name: &str) {
+        use solana_sdk::signature::{read_keypair_file, Signer};
+
+        // Load config
+        let mut config = match VaultConfig::load() {
+            Ok(c) => c,
+            Err(e) => {
+                self.status_message = Some(format!("❌ Failed to load vault config: {}", e));
+                self.mode = AppMode::VaultSwitchPopup;
+                self.vault_management_mode = VaultManagementMode::List;
+                self.needs_clear = true;
+                return;
+            }
+        };
+
+        // Get the vault to delete
+        let vault = match config.vaults.get(vault_name) {
+            Some(v) => v.clone(),
+            None => {
+                self.status_message = Some(format!("❌ Vault '{}' not found", vault_name));
+                self.mode = AppMode::VaultSwitchPopup;
+                self.vault_management_mode = VaultManagementMode::List;
+                self.needs_clear = true;
+                return;
+            }
+        };
+
+        // Try to close PQ account and reclaim rent first
+        match read_keypair_file(&vault.solana_keypair_path) {
+            Ok(keypair) => {
+                let wallet = keypair.pubkey();
+
+                // Try to close the PQ account (will fail gracefully if doesn't exist or is locked)
+                let close_result = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async {
+                        self.vault_client.close_pq_account(wallet, &vault.solana_keypair_path, None).await
+                    })
+                });
+
+                match close_result {
+                    Ok(_) => {
+                        self.status_message = Some(format!("💰 Closed PQ account and reclaimed rent for '{}'", vault_name));
+                    }
+                    Err(e) => {
+                        let error_str = format!("{:?}", e);
+                        if error_str.contains("AccountNotFound") || error_str.contains("not found") {
+                            // No PQ account - that's fine, proceed with deletion
+                            self.status_message = Some(format!("ℹ️  No PQ account found for '{}' (already closed or never created)", vault_name));
+                        } else if error_str.contains("locked") || error_str.contains("CannotCloseWhileLocked") {
+                            // BLOCKED - vault is locked, cannot delete
+                            self.status_message = Some(format!("❌ Cannot delete '{}' - PQ account is LOCKED! Unlock first to reclaim rent.", vault_name));
+                            self.mode = AppMode::VaultSwitchPopup;
+                            self.vault_management_mode = VaultManagementMode::List;
+                            self.vault_to_delete.clear();
+                            self.delete_confirmation_input.clear();
+                            self.needs_clear = true;  // Force terminal clear to prevent glitch
+                            return; // Don't proceed with deletion
+                        } else {
+                            // Unknown error - warn but allow deletion
+                            self.status_message = Some(format!("⚠️  Could not close PQ account: {}. Continue deletion anyway?", e));
+                            // TODO: Could add another confirmation here
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                // Can't load keypair - just warn and continue with delete
+                self.status_message = Some(format!("⚠️  Could not load keypair: {}. Deleting vault anyway.", e));
+            }
+        }
+
+        // Now delete the vault from config
+        match config.delete_vault(vault_name) {
+            Ok(_) => {
+                // Check if we deleted the active vault
+                if let Some(new_active) = &config.active_vault {
+                    self.status_message = Some(format!("✅ Deleted vault '{}'. Active: {}", vault_name, new_active));
+                } else {
+                    self.status_message = Some(format!("✅ Deleted vault '{}'", vault_name));
+                }
+
+                // Reload vault list and stay in VaultSwitchPopup
+                self.vault_list = config.list_vaults().into_iter().cloned().collect();
+                self.selected_vault_index = 0;
+                self.mode = AppMode::VaultSwitchPopup;
+                self.vault_management_mode = VaultManagementMode::List;
+                self.vault_to_delete.clear();
+                self.delete_confirmation_input.clear();
+                self.needs_clear = true;  // Force clean display
+
+                // Refresh dashboard data with potentially new active vault
+                self.refresh_data();
+            }
+            Err(e) => {
+                self.status_message = Some(format!("❌ Failed to delete vault: {}", e));
+                self.mode = AppMode::VaultSwitchPopup;
+                self.vault_management_mode = VaultManagementMode::List;
+                self.needs_clear = true;
+            }
+        }
+    }
+
+    fn perform_close(&mut self) {
+        // Clear any previous steps and show progress
+        self.action_steps.clear();
+        self.action_steps.push(ActionStep::InProgress("Closing PQ account...".to_string()));
+        self.mode = AppMode::ResultPopup;
+        self.needs_clear = true;
+
+        // Get wallet pubkey and keypair path
+        let wallet = self.wallet;
+        let keypair_path_str = self.keypair_path.to_str().unwrap().to_string();
+
+        // Execute close
+        let vault_client = &self.vault_client;
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                vault_client.close_pq_account(wallet, &keypair_path_str, None).await
+            })
+        });
+
+        // Show result
+        self.action_steps.clear();
+        match result {
+            Ok(_) => {
+                self.action_steps.push(ActionStep::Success("╔══════════════════════════════════════════╗".to_string()));
+                self.action_steps.push(ActionStep::Success("║      ✓ PQ ACCOUNT CLOSED!               ║".to_string()));
+                self.action_steps.push(ActionStep::Success("╚══════════════════════════════════════════╝".to_string()));
+                self.action_steps.push(ActionStep::Success("".to_string()));
+                self.action_steps.push(ActionStep::Success("✓ PQ account closed successfully".to_string()));
+                self.action_steps.push(ActionStep::Success("✓ Rent refunded to your wallet (~0.003 SOL)".to_string()));
+                self.action_steps.push(ActionStep::Success("".to_string()));
+                self.action_steps.push(ActionStep::InProgress("Your vault is now closed. You can still:".to_string()));
+                self.action_steps.push(ActionStep::InProgress("  • Register again to create a new PQ account".to_string()));
+                self.action_steps.push(ActionStep::InProgress("  • Keep using this wallet for transfers".to_string()));
+                self.action_steps.push(ActionStep::InProgress("".to_string()));
+                self.action_steps.push(ActionStep::InProgress("Press [Esc] to close this message".to_string()));
+                self.status_message = Some("✅ PQ account closed successfully!".to_string());
+
+                // Refresh dashboard to update vault status
+                self.refresh_data();
+            }
+            Err(e) => {
+                self.action_steps.push(ActionStep::Error("╔══════════════════════════════════════════╗".to_string()));
+                self.action_steps.push(ActionStep::Error("║      ✗ CLOSE FAILED                     ║".to_string()));
+                self.action_steps.push(ActionStep::Error("╚══════════════════════════════════════════╝".to_string()));
+                self.action_steps.push(ActionStep::Error("".to_string()));
+                self.action_steps.push(ActionStep::Error(format!("Error: {}", e)));
+                self.action_steps.push(ActionStep::Error("".to_string()));
+                self.action_steps.push(ActionStep::InProgress("Common issues:".to_string()));
+                self.action_steps.push(ActionStep::InProgress("  • PQ account might not exist (already closed?)".to_string()));
+                self.action_steps.push(ActionStep::InProgress("  • Vault might still be locked".to_string()));
+                self.action_steps.push(ActionStep::InProgress("  • Network connectivity issues".to_string()));
+                self.action_steps.push(ActionStep::InProgress("".to_string()));
+                self.action_steps.push(ActionStep::InProgress("Press [Esc] to close this message".to_string()));
+                self.status_message = Some("❌ Failed to close PQ account".to_string());
+            }
+        }
+
+        // Clear the confirmation input
+        self.vault_to_close.clear();
+        self.close_confirmation_input.clear();
+    }
+
+    fn perform_new_vault_action(&mut self) {
+        use solana_sdk::signature::Signer;
+        use solana_sdk::signature::Keypair;
+
+        self.action_steps.clear();
+        self.action_steps.push(ActionStep::InProgress(format!("Creating vault '{}'...", self.new_vault_name)));
+
+        // Load config
+        let mut config = match VaultConfig::load() {
+            Ok(c) => c,
+            Err(e) => {
+                self.action_steps.push(ActionStep::Error(format!("Failed to load config: {}", e)));
+                self.status_message = Some("❌ Failed to load vault config".to_string());
+                self.mode = AppMode::ResultPopup;
+                return;
+            }
+        };
+
+        // Check if vault already exists
+        if config.vaults.contains_key(&self.new_vault_name) {
+            self.action_steps.push(ActionStep::Error(format!("Vault '{}' already exists", self.new_vault_name)));
+            self.status_message = Some("❌ Vault already exists!".to_string());
+            self.mode = AppMode::ResultPopup;
+            return;
+        }
+
+        let home = match dirs::home_dir() {
+            Some(h) => h,
+            None => {
+                self.action_steps.push(ActionStep::Error("Could not determine home directory".to_string()));
+                self.status_message = Some("❌ Failed to create vault".to_string());
+                self.mode = AppMode::ResultPopup;
+                return;
+            }
+        };
+        let qdum_dir = home.join(".qdum");
+        let vault_dir = qdum_dir.join(&self.new_vault_name);
+
+        // Create vault directory
+        if let Err(e) = fs::create_dir_all(&vault_dir) {
+            self.action_steps.push(ActionStep::Error(format!("Failed to create directory: {}", e)));
+            self.status_message = Some("❌ Failed to create vault directory".to_string());
+            self.mode = AppMode::ResultPopup;
+            return;
+        }
+
+        self.action_steps.push(ActionStep::Success("Vault directory created".to_string()));
+
+        // Generate SPHINCS+ keys
+        self.action_steps.push(ActionStep::InProgress("Generating SPHINCS+ keys...".to_string()));
+        let key_manager = match SphincsKeyManager::new(Some(vault_dir.to_str().unwrap().to_string())) {
+            Ok(km) => km,
+            Err(e) => {
+                self.action_steps.push(ActionStep::Error(format!("Failed to create key manager: {}", e)));
+                self.status_message = Some("❌ Failed to generate keys".to_string());
+                self.mode = AppMode::ResultPopup;
+                return;
+            }
+        };
+
+        if let Err(e) = key_manager.generate_and_save_keypair() {
+            self.action_steps.push(ActionStep::Error(format!("Failed to generate SPHINCS+ keys: {}", e)));
+            self.status_message = Some("❌ Failed to generate keys".to_string());
+            self.mode = AppMode::ResultPopup;
+            return;
+        }
+
+        self.action_steps.push(ActionStep::Success("SPHINCS+ keys generated".to_string()));
+
+        // Generate Solana keypair
+        self.action_steps.push(ActionStep::InProgress("Generating Solana keypair...".to_string()));
+        let solana_keypair = Keypair::new();
+        let wallet_address = solana_keypair.pubkey().to_string();
+
+        let solana_keypair_path = vault_dir.join("solana-keypair.json");
+        let keypair_json = match serde_json::to_string(&solana_keypair.to_bytes().to_vec()) {
+            Ok(j) => j,
+            Err(e) => {
+                self.action_steps.push(ActionStep::Error(format!("Failed to serialize keypair: {}", e)));
+                self.status_message = Some("❌ Failed to save keypair".to_string());
+                self.mode = AppMode::ResultPopup;
+                return;
+            }
+        };
+
+        if let Err(e) = fs::write(&solana_keypair_path, keypair_json) {
+            self.action_steps.push(ActionStep::Error(format!("Failed to write keypair: {}", e)));
+            self.status_message = Some("❌ Failed to save keypair".to_string());
+            self.mode = AppMode::ResultPopup;
+            return;
+        }
+
+        self.action_steps.push(ActionStep::Success("Solana keypair generated".to_string()));
+
+        // Create vault profile
+        let mut profile = crate::vault_manager::VaultProfile::new(
+            self.new_vault_name.clone(),
+            solana_keypair_path.to_str().unwrap().to_string(),
+            vault_dir.join("sphincs_public.key").to_str().unwrap().to_string(),
+            vault_dir.join("sphincs_private.key").to_str().unwrap().to_string(),
+            wallet_address.clone(),
+        );
+        profile.description = Some("Created from dashboard".to_string());
+
+        // Create and switch to vault
+        if let Err(e) = config.create_vault(self.new_vault_name.clone(), profile) {
+            self.action_steps.push(ActionStep::Error(format!("Failed to save vault: {}", e)));
+            self.status_message = Some("❌ Failed to save vault config".to_string());
+            self.mode = AppMode::ResultPopup;
+            return;
+        }
+
+        if let Err(e) = config.switch_vault(&self.new_vault_name) {
+            self.action_steps.push(ActionStep::Error(format!("Failed to switch vault: {}", e)));
+            self.status_message = Some("❌ Failed to switch vault".to_string());
+            self.mode = AppMode::ResultPopup;
+            return;
+        }
+
+        // Update dashboard state with new vault info FIRST
+        use solana_sdk::signature::read_keypair_file;
+        use std::path::PathBuf;
+
+        match read_keypair_file(&solana_keypair_path) {
+            Ok(keypair) => {
+                self.wallet = keypair.pubkey();
+                self.keypair_path = PathBuf::from(&solana_keypair_path);
+                self.sphincs_public_key_path = vault_dir.join("sphincs_public.key").to_str().unwrap().to_string();
+                self.sphincs_private_key_path = vault_dir.join("sphincs_private.key").to_str().unwrap().to_string();
+
+                // Clear the input
+                self.new_vault_name.clear();
+
+                // Refresh data with new vault
+                self.refresh_data();
+
+                // NOW clear and set up the success popup
+                self.action_steps.clear();
+                self.action_steps.push(ActionStep::Success("╔══════════════════════════════════════════╗".to_string()));
+                self.action_steps.push(ActionStep::Success("║      ✓ VAULT CREATED!                   ║".to_string()));
+                self.action_steps.push(ActionStep::Success("╚══════════════════════════════════════════╝".to_string()));
+                self.action_steps.push(ActionStep::Success("".to_string()));
+                self.action_steps.push(ActionStep::Success(format!("Vault Name: {}", config.get_active_vault().map(|v| v.name.as_str()).unwrap_or("Unknown"))));
+                self.action_steps.push(ActionStep::Success(format!("Wallet:     {}", wallet_address)));
+                self.action_steps.push(ActionStep::Success("".to_string()));
+                self.action_steps.push(ActionStep::Success("✓ SPHINCS+ keys generated".to_string()));
+                self.action_steps.push(ActionStep::Success("✓ Solana keypair generated".to_string()));
+                self.action_steps.push(ActionStep::Success("✓ Vault activated".to_string()));
+                self.action_steps.push(ActionStep::Success("".to_string()));
+                self.action_steps.push(ActionStep::InProgress("Press [Esc] to close this message".to_string()));
+
+                // Show success message
+                self.status_message = Some("✅ Vault created successfully!".to_string());
+
+                // Show result popup
+                self.needs_clear = true;  // Force terminal clear for clean display
+                self.mode = AppMode::ResultPopup;
+            }
+            Err(e) => {
+                self.action_steps.clear();
+                self.action_steps.push(ActionStep::Error("╔══════════════════════════════════════════╗".to_string()));
+                self.action_steps.push(ActionStep::Error("║      ✗ VAULT LOAD FAILED                ║".to_string()));
+                self.action_steps.push(ActionStep::Error("╚══════════════════════════════════════════╝".to_string()));
+                self.action_steps.push(ActionStep::Error("".to_string()));
+                self.action_steps.push(ActionStep::Error("Vault was created but failed to load:".to_string()));
+                self.action_steps.push(ActionStep::Error(format!("{}", e)));
+                self.action_steps.push(ActionStep::Error("".to_string()));
+                self.action_steps.push(ActionStep::InProgress("Press [Esc] to close this message".to_string()));
+                self.status_message = Some("⚠️  Vault created but failed to load".to_string());
+                self.needs_clear = true;  // Force terminal clear for clean display
+                self.mode = AppMode::ResultPopup;
+            }
+        }
+    }
+
     fn ui(&self, f: &mut Frame) {
         let size = f.area();
 
@@ -1124,7 +2072,7 @@ impl Dashboard {
 
         // Full-width animated header with block gradient animations
         let pulse = self.get_pulse_intensity();
-        let bright = self.get_pulse_color_bright();
+        let _bright = self.get_pulse_color_bright();
 
         // Calculate dynamic width based on terminal size
         let width = chunks[0].width as usize;
@@ -1238,7 +2186,7 @@ impl Dashboard {
 
                 account_rows.push(Row::new(vec![
                     Line::from(Span::styled("PQ ACCOUNT", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
-                    Line::from(Span::styled("NOT REGISTERED - Use [R]", Style::default().fg(Theme::ORANGE_NEON).add_modifier(Modifier::BOLD))),
+                    Line::from(Span::styled("NOT REGISTERED - Use [G]", Style::default().fg(Theme::ORANGE_NEON).add_modifier(Modifier::BOLD))),
                 ]));
             }
         }
@@ -1286,16 +2234,25 @@ impl Dashboard {
             AppMode::RegisterPopup => self.render_action_popup(f, size, "REGISTER", Color::Green),
             AppMode::LockPopup => self.render_action_popup(f, size, "LOCK VAULT", Color::Red),
             AppMode::TransferPopup => self.render_transfer_popup(f, size),
+            AppMode::VaultSwitchPopup => self.render_vault_switch_popup(f, size),
+            AppMode::DeleteConfirmPopup => self.render_delete_confirm_popup(f, size),
+            AppMode::CloseConfirmPopup => self.render_close_confirm_popup(f, size),
+            AppMode::ChartPopup => self.render_chart_popup(f, size),
             AppMode::ResultPopup => {
-                let has_error = self.action_steps.iter().any(|step| matches!(step, ActionStep::Error(_)));
-                let color = if has_error { Color::Red } else { Color::Green };
-                self.render_action_popup(f, size, "TRANSFER RESULT", color);
+                self.render_transfer_result_popup(f, size);
             }
             _ => {}
         }
     }
 
     fn render_status_panel(&self, f: &mut Frame, area: Rect) {
+        // Get active vault name
+        let vault_name = if let Ok(config) = VaultConfig::load() {
+            config.active_vault.unwrap_or_else(|| "No Vault".to_string())
+        } else {
+            "Unknown".to_string()
+        };
+
         // Determine vault status
         let (status_text, status_color) = if let Some(ref status) = self.vault_status {
             if status.is_locked {
@@ -1317,6 +2274,14 @@ impl Dashboard {
 
         // Build table rows with clean data organization
         let rows = vec![
+            Row::new(vec![
+                Line::from(Span::styled("VAULT", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
+                Line::from(Span::styled(vault_name, Style::default().fg(Theme::PURPLE).add_modifier(Modifier::BOLD))),
+            ]),
+            Row::new(vec![
+                Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))),
+                Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))),
+            ]),
             Row::new(vec![
                 Line::from(Span::styled("STATUS", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
                 Line::from(Span::styled(status_text, Style::default().fg(status_color).add_modifier(Modifier::BOLD))),
@@ -1367,10 +2332,13 @@ impl Dashboard {
     fn render_actions_panel(&self, f: &mut Frame, area: Rect) {
         // Define actions with clean data structure
         let actions = vec![
-            ("🔐 REGISTER", "[R]", "Initialize PQ account", Theme::GREEN),
+            ("🔐 REGISTER", "[G]", "Initialize PQ account", Theme::GREEN),
             ("🔒 LOCK", "[L]", "Secure vault", Theme::RED),
             ("🔓 UNLOCK", "[U]", "Verify signature", Theme::YELLOW),
             ("💸 TRANSFER", "[T]", "Send tokens", Theme::CYAN),
+            ("❌ CLOSE", "[X]", "Close & reclaim rent", Theme::RED_NEON),
+            ("📊 CHART", "[M]", "Lock history chart", Theme::CYAN_NEON),
+            ("🗄️ VAULTS", "[V/N]", "Manage vaults", Theme::PURPLE),
         ];
 
         // Build table rows
@@ -1538,8 +2506,10 @@ impl Dashboard {
             Line::from(Span::styled("  L           - Lock vault", Style::default().fg(Theme::TEXT))),
             Line::from(Span::styled("  U           - Unlock vault", Style::default().fg(Theme::TEXT))),
             Line::from(Span::styled("  T or 2      - Transfer tokens", Style::default().fg(Theme::TEXT))),
+            Line::from(Span::styled("  X or 3      - Close PQ account & reclaim rent", Style::default().fg(Theme::TEXT))),
             Line::from(Span::styled("  R           - Refresh status", Style::default().fg(Theme::TEXT))),
             Line::from(Span::styled("  C           - Copy wallet address", Style::default().fg(Theme::TEXT))),
+            Line::from(Span::styled("  V           - Switch vault", Style::default().fg(Theme::TEXT))),
             Line::from(""),
             Line::from(vec![
                 Span::styled("Other:", Style::default().fg(Theme::GREEN_NEON).add_modifier(Modifier::BOLD)),
@@ -1724,63 +2694,78 @@ impl Dashboard {
 
         f.render_widget(anim_widget, anim_area);
 
-        // Bottom section: Progress info table
+        // Bottom section: Static table showing unlock process
         let mut rows = vec![];
 
-        if self.progress_total > 0 {
-            let progress_pct = (self.progress_current as f64 / self.progress_total as f64 * 100.0) as usize;
-
-            rows.push(Row::new(vec![
-                Line::from(Span::styled("PROGRESS", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
-                Line::from(Span::styled(
-                    format!("{}/{} steps ({}%)", self.progress_current, self.progress_total, progress_pct),
-                    Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD),
-                )),
-            ]));
-
-            rows.push(Row::new(vec![
-                Line::from(Span::styled("━━━━━━━━━━", Style::default().fg(Theme::DIM))),
-                Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))),
-            ]));
-
-            rows.push(Row::new(vec![
-                Line::from(Span::styled("STATUS", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
-                Line::from(Span::styled(
-                    "Verifying SPHINCS+ signature...",
-                    Style::default().fg(Theme::TEXT),
-                )),
-            ]));
-
-            if !self.progress_message.is_empty() {
-                rows.push(Row::new(vec![
-                    Line::from(Span::styled("PHASE", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
-                    Line::from(Span::styled(&self.progress_message, Style::default().fg(Theme::SUBTEXT1))),
-                ]));
-            }
-        } else {
-            rows.push(Row::new(vec![
-                Line::from(Span::styled("STATUS", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
-                Line::from(Span::styled(
-                    "Initializing quantum verification...",
-                    Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::ITALIC),
-                )),
-            ]));
-        }
-
+        // Header
         rows.push(Row::new(vec![
-            Line::from(Span::styled("━━━━━━━━━━", Style::default().fg(Theme::DIM))),
-            Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))),
+            Line::from(Span::styled("STEP", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled("PROCESS", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
         ]));
 
         rows.push(Row::new(vec![
-            Line::from(Span::styled("INFO", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled("━━━━━━", Style::default().fg(Theme::DIM))),
+            Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))),
+        ]));
+
+        // Step 1
+        rows.push(Row::new(vec![
+            Line::from(Span::styled("1", Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled("Load SPHINCS+ private key from vault", Style::default().fg(Theme::TEXT))),
+        ]));
+
+        // Step 2
+        rows.push(Row::new(vec![
+            Line::from(Span::styled("2", Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled("Fetch challenge from on-chain PQ account", Style::default().fg(Theme::TEXT))),
+        ]));
+
+        // Step 3
+        rows.push(Row::new(vec![
+            Line::from(Span::styled("3", Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled("Generate quantum-resistant signature (SPHINCS+)", Style::default().fg(Theme::TEXT))),
+        ]));
+
+        rows.push(Row::new(vec![
+            Line::from(Span::styled("", Style::default())),
+            Line::from(Span::styled("└─ This step takes ~1-2 minutes", Style::default().fg(Theme::SUBTEXT1).add_modifier(Modifier::ITALIC))),
+        ]));
+
+        // Step 4
+        rows.push(Row::new(vec![
+            Line::from(Span::styled("4", Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled("Submit signature transaction to Solana", Style::default().fg(Theme::TEXT))),
+        ]));
+
+        // Step 5
+        rows.push(Row::new(vec![
+            Line::from(Span::styled("5", Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD))),
+            Line::from(Span::styled("Verify vault unlock status", Style::default().fg(Theme::TEXT))),
+        ]));
+
+        rows.push(Row::new(vec![
+            Line::from(Span::styled("━━━━━━", Style::default().fg(Theme::DIM))),
+            Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))),
+        ]));
+
+        // Info message
+        rows.push(Row::new(vec![
+            Line::from(Span::styled("ℹ", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
             Line::from(Span::styled(
-                "This may take 1-2 minutes. Please wait...",
+                "Quantum-resistant cryptography is computationally intensive.",
                 Style::default().fg(Theme::SUBTEXT1),
             )),
         ]));
 
-        let widths = [Constraint::Length(12), Constraint::Min(35)];
+        rows.push(Row::new(vec![
+            Line::from(Span::styled("", Style::default())),
+            Line::from(Span::styled(
+                "Please wait patiently while SPHINCS+ signature is generated.",
+                Style::default().fg(Theme::SUBTEXT1),
+            )),
+        ]));
+
+        let widths = [Constraint::Length(8), Constraint::Min(50)];
 
         let info_table = Table::new(rows, widths)
             .block(
@@ -1788,7 +2773,7 @@ impl Dashboard {
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Color::Rgb(pulse, pulse, 0)).add_modifier(Modifier::BOLD))
                     .border_type(BorderType::Rounded)
-                    .title(" VERIFICATION DETAILS ")
+                    .title(" UNLOCK PROCESS ")
                     .title_style(Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD)),
             )
             .style(Style::default().bg(Theme::PANEL_BG))
@@ -1934,9 +2919,751 @@ impl Dashboard {
 
         f.render_widget(table, popup_area);
     }
+
+    fn render_vault_switch_popup(&self, f: &mut Frame, area: Rect) {
+        match self.vault_management_mode {
+            VaultManagementMode::List => self.render_vault_list(f, area),
+            VaultManagementMode::Create => self.render_vault_create(f, area),
+        }
+    }
+
+    fn render_vault_list(&self, f: &mut Frame, area: Rect) {
+        let popup_area = centered_rect(70, 70, area);
+
+        // Clear background
+        f.render_widget(Clear, popup_area);
+
+        // Get active vault name
+        let active_vault_name = if let Ok(config) = VaultConfig::load() {
+            config.active_vault
+        } else {
+            None
+        };
+
+        // Build table rows for vault list
+        let mut rows = vec![];
+
+        // Header
+        rows.push(Row::new(vec![
+            Line::from(Span::styled("Select a vault to switch, or create a new one", Style::default().fg(Theme::TEXT))),
+        ]).height(2));
+
+        rows.push(Row::new(vec![
+            Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))),
+        ]));
+
+        // Vault list
+        for (i, vault) in self.vault_list.iter().enumerate() {
+            let is_active = active_vault_name.as_ref() == Some(&vault.name);
+            let is_selected = self.selected_vault_index == i;
+
+            let indicator = if is_active { "●" } else { "○" };
+            let status = if is_active { " [ACTIVE]" } else { "" };
+
+            let name_color = if is_selected {
+                Theme::YELLOW_NEON
+            } else if is_active {
+                Theme::GREEN_NEON
+            } else {
+                Theme::TEXT
+            };
+
+            let indicator_color = if is_active {
+                Theme::GREEN_NEON
+            } else {
+                Theme::DIM
+            };
+
+            let mut spans = vec![
+                Span::styled(" ", Style::default()),
+                Span::styled(indicator, Style::default().fg(indicator_color).add_modifier(Modifier::BOLD)),
+                Span::styled("  ", Style::default()),
+                Span::styled(&vault.name, Style::default().fg(name_color).add_modifier(Modifier::BOLD)),
+            ];
+
+            if is_active {
+                spans.push(Span::styled(status, Style::default().fg(Theme::GREEN_NEON).add_modifier(Modifier::BOLD)));
+            }
+
+            if is_selected {
+                spans.insert(0, Span::styled("▶ ", Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD)));
+            } else {
+                spans.insert(0, Span::styled("  ", Style::default()));
+            }
+
+            rows.push(Row::new(vec![Line::from(spans)]));
+
+            // Wallet address
+            let wallet_info = if !vault.wallet_address.is_empty() {
+                format!("     └─ {}", vault.short_wallet())
+            } else {
+                "     └─ (not initialized)".to_string()
+            };
+
+            rows.push(Row::new(vec![
+                Line::from(Span::styled(wallet_info, Style::default().fg(Theme::DIM))),
+            ]));
+        }
+
+        // Separator
+        rows.push(Row::new(vec![Line::from("")]));
+
+        // "Create New Vault" option
+        let is_create_selected = self.selected_vault_index == self.vault_list.len();
+        let create_color = if is_create_selected {
+            Theme::YELLOW_NEON
+        } else {
+            Theme::GREEN_NEON
+        };
+
+        let mut create_spans = vec![
+            Span::styled(" + ", Style::default().fg(create_color).add_modifier(Modifier::BOLD)),
+            Span::styled("Create New Vault", Style::default().fg(create_color).add_modifier(Modifier::BOLD)),
+        ];
+
+        if is_create_selected {
+            create_spans.insert(0, Span::styled("▶ ", Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD)));
+        } else {
+            create_spans.insert(0, Span::styled("  ", Style::default()));
+        }
+
+        rows.push(Row::new(vec![Line::from(create_spans)]));
+
+        rows.push(Row::new(vec![Line::from("")]));
+
+        // Controls - Line 1
+        rows.push(Row::new(vec![
+            Line::from(vec![
+                Span::styled("↑↓/jk", Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled(" Navigate  ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("Enter", Style::default().fg(Theme::GREEN_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled(" Select  ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("N", Style::default().fg(Theme::PURPLE).add_modifier(Modifier::BOLD)),
+                Span::styled(" New", Style::default().fg(Theme::SUBTEXT1)),
+            ]),
+        ]));
+
+        // Controls - Line 2
+        rows.push(Row::new(vec![
+            Line::from(vec![
+                Span::styled("D", Style::default().fg(Theme::RED_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled(" Delete  ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("Esc", Style::default().fg(Theme::RED_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled(" Cancel", Style::default().fg(Theme::SUBTEXT1)),
+            ]),
+        ]));
+
+        let widths = [Constraint::Percentage(100)];
+
+        let table = Table::new(rows, widths)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Theme::PURPLE).add_modifier(Modifier::BOLD))
+                    .border_type(BorderType::Rounded)
+                    .title(" 🗄️  VAULT MANAGEMENT 🗄️  ")
+                    .title_style(Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD)),
+            )
+            .style(Style::default().bg(Theme::PANEL_BG))
+            .column_spacing(1);
+
+        f.render_widget(table, popup_area);
+    }
+
+    fn render_vault_create(&self, f: &mut Frame, area: Rect) {
+        let popup_area = centered_rect(60, 40, area);
+
+        // Clear background
+        f.render_widget(Clear, popup_area);
+
+        // Build table rows for vault creation form
+        let mut rows = vec![];
+
+        // Instruction row
+        rows.push(Row::new(vec![
+            Line::from(Span::styled("Create a new quantum-resistant vault", Style::default().fg(Theme::TEXT))),
+        ]).height(2));
+
+        rows.push(Row::new(vec![
+            Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))),
+        ]));
+
+        // Vault name field
+        let vault_display = if self.new_vault_name.is_empty() {
+            "[Enter vault name...]".to_string()
+        } else {
+            self.new_vault_name.clone()
+        };
+
+        rows.push(Row::new(vec![
+            Line::from(Span::styled("VAULT NAME", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))),
+        ]));
+
+        rows.push(Row::new(vec![
+            Line::from(Span::styled(vault_display, Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD))),
+        ]));
+
+        rows.push(Row::new(vec![
+            Line::from(Span::styled("▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔", Style::default().fg(Theme::YELLOW_NEON))),
+        ]));
+
+        rows.push(Row::new(vec![Line::from("")]));
+
+        // Info row
+        rows.push(Row::new(vec![
+            Line::from(Span::styled("• New keys will be auto-generated", Style::default().fg(Theme::SUBTEXT1))),
+        ]));
+
+        rows.push(Row::new(vec![
+            Line::from(Span::styled("• Vault will be automatically activated", Style::default().fg(Theme::SUBTEXT1))),
+        ]));
+
+        rows.push(Row::new(vec![Line::from("")]));
+
+        // Controls row
+        rows.push(Row::new(vec![
+            Line::from(vec![
+                Span::styled("Press ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("Enter", Style::default().fg(Theme::GREEN_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled(" to create • ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("Esc", Style::default().fg(Theme::RED_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled(" to go back", Style::default().fg(Theme::SUBTEXT1)),
+            ]),
+        ]));
+
+        let widths = [Constraint::Percentage(100)];
+
+        let table = Table::new(rows, widths)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Theme::PURPLE).add_modifier(Modifier::BOLD))
+                    .border_type(BorderType::Rounded)
+                    .title(" 🗄️  CREATE NEW VAULT 🗄️  ")
+                    .title_style(Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD)),
+            )
+            .style(Style::default().bg(Theme::PANEL_BG))
+            .column_spacing(2);
+
+        f.render_widget(table, popup_area);
+    }
+
+    fn render_transfer_result_popup(&self, f: &mut Frame, area: Rect) {
+        let popup_area = centered_rect(70, 70, area);
+
+        // Clear background - IMPORTANT for visibility
+        f.render_widget(Clear, popup_area);
+
+        // Determine if there are any errors
+        let has_error = self.action_steps.iter().any(|step| matches!(step, ActionStep::Error(_)));
+        let success = !has_error;
+
+        // Build table rows from action_steps
+        let mut rows = vec![];
+
+        // Display all action steps directly
+        if self.action_steps.is_empty() {
+            rows.push(Row::new(vec![
+                Line::from(Span::styled("No result to display", Style::default().fg(Theme::SUBTEXT1).add_modifier(Modifier::ITALIC))),
+            ]));
+        } else {
+            for step in &self.action_steps {
+                let (text, color) = match step {
+                    ActionStep::Starting => ("⏳ Starting...".to_string(), Theme::YELLOW_NEON),
+                    ActionStep::InProgress(msg) => (msg.clone(), Theme::TEXT),
+                    ActionStep::Success(msg) => (msg.clone(), Theme::GREEN_NEON),
+                    ActionStep::Error(msg) => (msg.clone(), Theme::RED_NEON),
+                };
+
+                rows.push(Row::new(vec![
+                    Line::from(Span::styled(text, Style::default().fg(color))),
+                ]));
+            }
+        }
+
+        let widths = [Constraint::Percentage(100)];
+
+        let border_color = if success { Theme::GREEN_NEON } else { Theme::RED_NEON };
+        let title = if success { " ✓ ACTION COMPLETE " } else { " ✗ ACTION FAILED " };
+
+        let table = Table::new(rows, widths)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
+                    .border_type(BorderType::Rounded)
+                    .title(title)
+                    .title_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD)),
+            )
+            .style(Style::default().bg(Theme::PANEL_BG))
+            .column_spacing(1);
+
+        f.render_widget(table, popup_area);
+    }
+
+    fn render_close_confirm_popup(&self, f: &mut Frame, area: Rect) {
+        let popup_area = centered_rect(70, 45, area);
+
+        // Clear background
+        f.render_widget(Clear, popup_area);
+
+        // Build table rows for close confirmation
+        let mut rows = vec![];
+
+        // Warning header
+        rows.push(Row::new(vec![
+            Line::from(Span::styled(
+                "⚠️  CLOSE PQ ACCOUNT & RECLAIM RENT ⚠️",
+                Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD),
+            )),
+        ]));
+
+        rows.push(Row::new(vec![
+            Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))),
+        ]));
+
+        // Info text
+        rows.push(Row::new(vec![
+            Line::from(Span::styled(
+                format!("Closing PQ account for vault: {}", self.vault_to_close),
+                Style::default().fg(Theme::TEXT),
+            )),
+        ]));
+
+        rows.push(Row::new(vec![Line::from("")])); // Empty line
+
+        rows.push(Row::new(vec![
+            Line::from(Span::styled(
+                "This will:",
+                Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD),
+            )),
+        ]));
+
+        rows.push(Row::new(vec![
+            Line::from(Span::styled(
+                "  • Close your on-chain PQ account",
+                Style::default().fg(Theme::SUBTEXT1),
+            )),
+        ]));
+
+        rows.push(Row::new(vec![
+            Line::from(Span::styled(
+                "  • Refund ~0.003 SOL rent to your wallet",
+                Style::default().fg(Theme::GREEN_NEON),
+            )),
+        ]));
+
+        rows.push(Row::new(vec![
+            Line::from(Span::styled(
+                "  • Keep your vault config and keys intact",
+                Style::default().fg(Theme::SUBTEXT1),
+            )),
+        ]));
+
+        rows.push(Row::new(vec![Line::from("")])); // Empty line
+
+        // Instruction
+        rows.push(Row::new(vec![
+            Line::from(vec![
+                Span::styled("Type ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled(&self.vault_to_close, Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled(" to confirm:", Style::default().fg(Theme::SUBTEXT1)),
+            ]),
+        ]));
+
+        rows.push(Row::new(vec![Line::from("")])); // Empty line
+
+        // Input field
+        let input_display = if self.close_confirmation_input.is_empty() {
+            "[type vault name here...]"
+        } else {
+            &self.close_confirmation_input
+        };
+
+        rows.push(Row::new(vec![
+            Line::from(Span::styled(
+                input_display,
+                Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD),
+            )),
+        ]));
+
+        // Underline for input field
+        rows.push(Row::new(vec![
+            Line::from(Span::styled("▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔", Style::default().fg(Theme::YELLOW_NEON))),
+        ]));
+
+        rows.push(Row::new(vec![Line::from("")])); // Empty line
+
+        // Controls
+        rows.push(Row::new(vec![
+            Line::from(vec![
+                Span::styled("[Enter] ", Style::default().fg(Theme::GREEN_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled("Confirm  ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("[Esc] ", Style::default().fg(Theme::RED_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled("Cancel", Style::default().fg(Theme::SUBTEXT1)),
+            ]),
+        ]));
+
+        // Create table
+        let table = Table::new(
+            rows,
+            [Constraint::Percentage(100)],
+        )
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Double)
+                .border_style(Style::default().fg(Theme::YELLOW_NEON))
+                .title(" CLOSE PQ ACCOUNT ")
+                .title_style(Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD))
+                .style(Style::default().bg(Theme::BASE)),
+        );
+
+        f.render_widget(table, popup_area);
+    }
+
+    fn render_chart_popup(&self, f: &mut Frame, area: Rect) {
+        use ratatui::widgets::{Dataset, GraphType};
+        use ratatui::symbols;
+        use chrono::{DateTime, Utc, Duration as ChronoDuration};
+
+        let popup_area = centered_rect(85, 70, area);
+
+        // Clear background
+        f.render_widget(Clear, popup_area);
+
+        // Load network-wide lock history
+        let history = LockHistory::load().unwrap_or_else(|_| LockHistory { entries: Vec::new() });
+
+        // Filter entries based on selected timeframe
+        let filtered_entries: Vec<&LockHistoryEntry> = if let Some(duration) = self.chart_timeframe.to_duration() {
+            let cutoff = Utc::now() - duration;
+            let filtered: Vec<&LockHistoryEntry> = history.entries.iter()
+                .filter(|entry| {
+                    DateTime::parse_from_rfc3339(&entry.timestamp)
+                        .ok()
+                        .map(|dt| dt.with_timezone(&Utc) > cutoff)
+                        .unwrap_or(false)
+                })
+                .collect();
+
+            // Debug: write filter info
+            let _ = std::fs::write("/tmp/qdum-chart-filter.log",
+                format!("Timeframe: {}\nTotal entries: {}\nFiltered entries: {}\nCutoff: {:?}\n",
+                    self.chart_timeframe.to_string(), history.entries.len(), filtered.len(), cutoff));
+
+            filtered
+        } else {
+            // Show all data
+            let _ = std::fs::write("/tmp/qdum-chart-filter.log",
+                format!("Timeframe: ALL\nTotal entries: {}\nFiltered entries: {}\n",
+                    history.entries.len(), history.entries.len()));
+            history.entries.iter().collect()
+        };
+
+        // Prepare data for chart with intelligent sampling
+        const MAX_POINTS: usize = 150; // Limit chart points for performance and readability
+
+        let data_points: Vec<(f64, f64)> = if filtered_entries.len() <= MAX_POINTS {
+            // If we have fewer entries than the max, use all of them
+            filtered_entries.iter()
+                .enumerate()
+                .map(|(i, entry)| (i as f64, entry.locked_amount))
+                .collect()
+        } else {
+            // Sample data points evenly across the dataset
+            let step = filtered_entries.len() as f64 / MAX_POINTS as f64;
+            (0..MAX_POINTS)
+                .map(|i| {
+                    let index = (i as f64 * step) as usize;
+                    let entry = filtered_entries[index.min(filtered_entries.len() - 1)];
+                    (i as f64, entry.locked_amount)
+                })
+                .collect()
+        };
+
+        // Parse timestamps for better labeling
+        let (first_time, last_time) = if !filtered_entries.is_empty() {
+            let first = filtered_entries.first().and_then(|e| DateTime::parse_from_rfc3339(&e.timestamp).ok());
+            let last = filtered_entries.last().and_then(|e| DateTime::parse_from_rfc3339(&e.timestamp).ok());
+            (first, last)
+        } else {
+            (None, None)
+        };
+
+        // Calculate dynamic Y-axis bounds with padding for better visualization
+        let (y_min, y_max) = if data_points.is_empty() {
+            (0.0, 100.0)  // Default range if no data
+        } else {
+            let values: Vec<f64> = data_points.iter().map(|(_, y)| *y).collect();
+            let min_val = values.iter().cloned().fold(f64::INFINITY, f64::min);
+            let max_val = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+
+            // Add 20% padding above and below the data range
+            let range = max_val - min_val;
+            let padding = if range > 0.0 { range * 0.2 } else { max_val * 0.2 };
+
+            let padded_min = (min_val - padding).max(0.0);  // Don't go below 0
+            let padded_max = max_val + padding;
+
+            // Ensure minimum range of 10 QDUM for readability
+            if (padded_max - padded_min) < 10.0 {
+                let mid = (padded_max + padded_min) / 2.0;
+                (mid - 5.0, mid + 5.0)
+            } else {
+                (padded_min, padded_max)
+            }
+        };
+
+        // Create dataset
+        let datasets = vec![
+            Dataset::default()
+                .name("Locked QDUM")
+                .marker(symbols::Marker::Braille)
+                .graph_type(GraphType::Line)
+                .style(Style::default().fg(Theme::CYAN_NEON))
+                .data(&data_points)
+        ];
+
+        // Create chart with dynamic title showing current timeframe and data count
+        let chart_title = format!(" 📊 LOCKED QDUM [{} - {} points] ",
+            self.chart_timeframe.to_string(),
+            filtered_entries.len());
+        let chart = ratatui::widgets::Chart::new(datasets)
+            .block(
+                Block::default()
+                    .title(chart_title)
+                    .title_style(Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD))
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Theme::CYAN_NEON))
+                    .border_type(BorderType::Rounded)
+                    .style(Style::default().bg(Theme::BASE)),
+            )
+            .x_axis(
+                ratatui::widgets::Axis::default()
+                    .title("Time →")
+                    .style(Style::default().fg(Theme::SUBTEXT1))
+                    .bounds([0.0, data_points.len().max(10) as f64])
+                    .labels({
+                        // Create time-based labels
+                        let start_label = if let Some(first) = first_time {
+                            format!("{}", first.format("%m/%d %H:%M"))
+                        } else {
+                            "Start".to_string()
+                        };
+
+                        let end_label = if let Some(last) = last_time {
+                            format!("{}", last.format("%m/%d %H:%M"))
+                        } else {
+                            "Now".to_string()
+                        };
+
+                        // Calculate middle timestamp
+                        let mid_label = if let (Some(first), Some(last)) = (first_time, last_time) {
+                            let duration = last.signed_duration_since(first);
+                            let mid_time = first + duration / 2;
+                            format!("{}", mid_time.format("%m/%d"))
+                        } else {
+                            "".to_string()
+                        };
+
+                        vec![
+                            Span::styled(start_label, Style::default().fg(Theme::SUBTEXT1)),
+                            Span::styled(mid_label, Style::default().fg(Theme::SUBTEXT1)),
+                            Span::styled(end_label, Style::default().fg(Theme::SUBTEXT1)),
+                        ]
+                    })
+            )
+            .y_axis(
+                ratatui::widgets::Axis::default()
+                    .title("Locked QDUM")
+                    .style(Style::default().fg(Theme::SUBTEXT1))
+                    .bounds([y_min, y_max])
+                    .labels(vec![
+                        Span::styled(format!("{:.0}", y_min), Style::default().fg(Theme::SUBTEXT1)),
+                        Span::styled(format!("{:.0}", (y_min + y_max) / 2.0), Style::default().fg(Theme::SUBTEXT1)),
+                        Span::styled(format!("{:.0}", y_max), Style::default().fg(Theme::SUBTEXT1)),
+                    ])
+            );
+
+        // Create info panel below chart
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(10),        // Chart
+                Constraint::Length(8),      // Info panel with timeframe controls
+            ])
+            .split(popup_area);
+
+        // Render chart
+        f.render_widget(chart, chunks[0]);
+
+        // Get cache age for display
+        let cache_age_text = if let Some(age) = self.vault_client.get_network_lock_cache_age() {
+            let seconds = age.as_secs();
+            if seconds < 60 {
+                format!("{}s ago", seconds)
+            } else if seconds < 3600 {
+                format!("{}m ago", seconds / 60)
+            } else {
+                format!("{}h ago", seconds / 3600)
+            }
+        } else {
+            "never".to_string()
+        };
+
+        // Render info panel
+        let info_text = vec![
+            Line::from(vec![
+                Span::styled("📊 ", Style::default().fg(Theme::CYAN_NEON)),
+                Span::styled("Snapshots: ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled(format!("{} (showing: {})", history.entries.len(), filtered_entries.len()), Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled("  |  ", Style::default().fg(Theme::DIM)),
+                Span::styled("Network Total: ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled(
+                    if let Some(last) = history.entries.last() {
+                        format!("{:.2} QDUM", last.locked_amount)
+                    } else {
+                        "No data".to_string()
+                    },
+                    Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD)
+                ),
+                Span::styled("  |  ", Style::default().fg(Theme::DIM)),
+                Span::styled("Updated: ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled(cache_age_text, Style::default().fg(Theme::GREEN_NEON).add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(""),  // Empty line for spacing
+            Line::from(vec![
+                Span::styled("⌚ Timeframe: ", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled("[M] ", Style::default().fg(if self.chart_timeframe == ChartTimeframe::FiveMinutes { Theme::CYAN_NEON } else { Theme::SUBTEXT1 }).add_modifier(Modifier::BOLD)),
+                Span::styled("5M  ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("[1] ", Style::default().fg(if self.chart_timeframe == ChartTimeframe::OneDay { Theme::CYAN_NEON } else { Theme::SUBTEXT1 }).add_modifier(Modifier::BOLD)),
+                Span::styled("1D  ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("[5] ", Style::default().fg(if self.chart_timeframe == ChartTimeframe::FiveDays { Theme::CYAN_NEON } else { Theme::SUBTEXT1 }).add_modifier(Modifier::BOLD)),
+                Span::styled("5D  ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("[7] ", Style::default().fg(if self.chart_timeframe == ChartTimeframe::OneWeek { Theme::CYAN_NEON } else { Theme::SUBTEXT1 }).add_modifier(Modifier::BOLD)),
+                Span::styled("1W  ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("[3] ", Style::default().fg(if self.chart_timeframe == ChartTimeframe::OneMonth { Theme::CYAN_NEON } else { Theme::SUBTEXT1 }).add_modifier(Modifier::BOLD)),
+                Span::styled("1M  ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("[A] ", Style::default().fg(if self.chart_timeframe == ChartTimeframe::All { Theme::CYAN_NEON } else { Theme::SUBTEXT1 }).add_modifier(Modifier::BOLD)),
+                Span::styled("ALL", Style::default().fg(Theme::SUBTEXT1)),
+            ]),
+            Line::from(""),  // Empty line for spacing
+            Line::from(vec![
+                Span::styled("[Esc] ", Style::default().fg(Theme::RED_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled("Close  ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("[R] ", Style::default().fg(Theme::CYAN_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled("Refresh  ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("[L] ", Style::default().fg(Theme::GREEN_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled("View Log", Style::default().fg(Theme::SUBTEXT1)),
+            ]),
+        ];
+
+        let info_block = Paragraph::new(info_text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Theme::DIM))
+                    .border_type(BorderType::Rounded)
+                    .style(Style::default().bg(Theme::PANEL_BG)),
+            )
+            .alignment(ratatui::layout::Alignment::Center);
+
+        f.render_widget(info_block, chunks[1]);
+    }
+
+    fn render_delete_confirm_popup(&self, f: &mut Frame, area: Rect) {
+        let popup_area = centered_rect(70, 40, area);
+
+        // Clear background
+        f.render_widget(Clear, popup_area);
+
+        // Build table rows for delete confirmation
+        let mut rows = vec![];
+
+        // Warning header
+        rows.push(Row::new(vec![
+            Line::from(Span::styled(
+                "⚠️  WARNING: PERMANENT DELETION ⚠️",
+                Style::default().fg(Theme::RED_NEON).add_modifier(Modifier::BOLD),
+            )),
+        ]));
+
+        rows.push(Row::new(vec![
+            Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))),
+        ]));
+
+        // Info text
+        rows.push(Row::new(vec![
+            Line::from(Span::styled(
+                format!("Deleting vault: {}", self.vault_to_delete),
+                Style::default().fg(Theme::TEXT),
+            )),
+        ]));
+
+        rows.push(Row::new(vec![Line::from("")])); // Empty line
+
+        // Instruction
+        rows.push(Row::new(vec![
+            Line::from(vec![
+                Span::styled("Type ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled(&self.vault_to_delete, Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled(" to confirm:", Style::default().fg(Theme::SUBTEXT1)),
+            ]),
+        ]));
+
+        rows.push(Row::new(vec![Line::from("")])); // Empty line
+
+        // Input field
+        let input_display = if self.delete_confirmation_input.is_empty() {
+            "[type vault name here...]"
+        } else {
+            &self.delete_confirmation_input
+        };
+
+        rows.push(Row::new(vec![
+            Line::from(Span::styled(
+                input_display,
+                Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD),
+            )),
+        ]));
+
+        // Underline for input field
+        rows.push(Row::new(vec![
+            Line::from(Span::styled("▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔", Style::default().fg(Theme::YELLOW_NEON))),
+        ]));
+
+        rows.push(Row::new(vec![Line::from("")])); // Empty line
+
+        // Controls
+        rows.push(Row::new(vec![
+            Line::from(vec![
+                Span::styled("[Enter] ", Style::default().fg(Theme::GREEN_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled("Confirm  ", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("[Esc] ", Style::default().fg(Theme::RED_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled("Cancel", Style::default().fg(Theme::SUBTEXT1)),
+            ]),
+        ]));
+
+        // Create table
+        let table = Table::new(
+            rows,
+            [Constraint::Percentage(100)],
+        )
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Double)
+                .border_style(Style::default().fg(Theme::RED_NEON))
+                .title(" DELETE VAULT ")
+                .title_style(Style::default().fg(Theme::RED_NEON).add_modifier(Modifier::BOLD))
+                .style(Style::default().bg(Theme::BASE)),
+        );
+
+        f.render_widget(table, popup_area);
+    }
 }
 
-// Helper function to create a centered rect
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     let popup_layout = Layout::default()
         .direction(Direction::Vertical)

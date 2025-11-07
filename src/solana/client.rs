@@ -1,7 +1,12 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
-use solana_client::rpc_client::RpcClient;
+use solana_client::{
+    rpc_client::RpcClient,
+    rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
+    rpc_filter::{RpcFilterType, Memcmp},
+};
+use solana_account_decoder::{UiAccountEncoding, UiDataSliceConfig};
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     instruction::Instruction,
@@ -10,7 +15,8 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use std::fs;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
 
 use crate::crypto::sphincs::{SphincsKeyManager, SPHINCS_PUBKEY_SIZE, SPHINCS_SIGNATURE_SIZE};
 
@@ -26,7 +32,9 @@ const TOKEN_2022_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("TokenzQdBNbLqP5VEhdkA
 
 /// Instruction discriminators (from IDL - quantdum_token.json)
 const INITIALIZE_PQ_ACCOUNT_DISCRIMINATOR: [u8; 8] = [185, 126, 40, 29, 205, 105, 111, 213];
+const WRITE_PUBLIC_KEY_DISCRIMINATOR: [u8; 8] = [69, 199, 141, 25, 213, 45, 192, 226];
 const LOCK_TOKENS_DISCRIMINATOR: [u8; 8] = [136, 11, 32, 232, 161, 117, 54, 211];
+const CLOSE_PQ_ACCOUNT_DISCRIMINATOR: [u8; 8] = [213, 32, 12, 184, 191, 154, 92, 97];
 
 // SPHINCS+ verification flow discriminators
 const INITIALIZE_SPHINCS_STORAGE_DISCRIMINATOR: [u8; 8] = [140, 15, 169, 242, 61, 148, 238, 70];
@@ -55,9 +63,28 @@ fn get_associated_token_address(wallet: &Pubkey, mint: &Pubkey, token_program: &
     address
 }
 
+/// Cache for network lock query results
+#[derive(Debug, Clone)]
+struct NetworkLockCache {
+    total_locked: f64,
+    holder_count: usize,
+    timestamp: SystemTime,
+    mint: Pubkey,
+}
+
+impl NetworkLockCache {
+    fn is_expired(&self, max_age: Duration) -> bool {
+        SystemTime::now()
+            .duration_since(self.timestamp)
+            .map(|age| age > max_age)
+            .unwrap_or(true)
+    }
+}
+
 pub struct VaultClient {
     rpc_client: RpcClient,
     program_id: Pubkey,
+    network_lock_cache: Arc<Mutex<Option<NetworkLockCache>>>,
 }
 
 impl VaultClient {
@@ -72,6 +99,7 @@ impl VaultClient {
         Ok(Self {
             rpc_client,
             program_id,
+            network_lock_cache: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -122,7 +150,7 @@ impl VaultClient {
 
         println!("Creating PQ account registration transaction...");
 
-        // Build instruction data (algorithm only - public key set separately)
+        // Build instruction data (algorithm only - public key written separately)
         let mut instruction_data = Vec::new();
         instruction_data.extend_from_slice(&INITIALIZE_PQ_ACCOUNT_DISCRIMINATOR);
         instruction_data.push(2); // Algorithm: SPHINCS+-SHA2-128s
@@ -152,6 +180,84 @@ impl VaultClient {
         println!("{}", "✅ PQ Account Registered!".green().bold());
         println!("   Transaction: {}", signature.to_string().cyan());
         println!("   View on Solscan: https://solscan.io/tx/{}?cluster=devnet", signature);
+        println!();
+
+        // Now write the SPHINCS+ public key to the PQ account
+        println!("Writing SPHINCS+ public key to PQ account...");
+        self.write_public_key(wallet, keypair_path, sphincs_pubkey).await?;
+
+        Ok(())
+    }
+
+    /// Write SPHINCS+ public key to PQ account (called after registration)
+    async fn write_public_key(
+        &self,
+        wallet: Pubkey,
+        keypair_path: &str,
+        sphincs_pubkey: &[u8; SPHINCS_PUBKEY_SIZE],
+    ) -> Result<()> {
+        let keypair = self.load_keypair(keypair_path)?;
+        let (pq_account, _) = self.derive_pq_account(wallet);
+
+        // Create a temporary account to hold the public key data
+        let temp_keypair = Keypair::new();
+
+        // Calculate rent for 32 bytes
+        let rent = self.rpc_client.get_minimum_balance_for_rent_exemption(32)?;
+
+        // Create the temporary account with the public key as initial data
+        // We'll allocate and assign to our program so we can write the data
+        let create_account_ix = solana_sdk::system_instruction::create_account(
+            &keypair.pubkey(),
+            &temp_keypair.pubkey(),
+            rent,
+            32,
+            &self.program_id, // Owned by our program so write_data can write to it
+        );
+
+        // Build write_data instruction to write the public key to temp account
+        let mut write_data_instruction_data = Vec::new();
+        write_data_instruction_data.extend_from_slice(&[211, 152, 195, 131, 83, 179, 248, 77]); // WRITE_DATA_DISCRIMINATOR
+        write_data_instruction_data.extend_from_slice(&0u32.to_le_bytes()); // offset = 0
+        write_data_instruction_data.extend_from_slice(&(sphincs_pubkey.len() as u32).to_le_bytes()); // data length
+        write_data_instruction_data.extend_from_slice(sphincs_pubkey); // the public key data
+
+        let write_data_ix = Instruction {
+            program_id: self.program_id,
+            accounts: vec![
+                solana_sdk::instruction::AccountMeta::new(temp_keypair.pubkey(), false),
+                solana_sdk::instruction::AccountMeta::new(keypair.pubkey(), true),
+            ],
+            data: write_data_instruction_data,
+        };
+
+        // Build the write_public_key instruction
+        let instruction_data = WRITE_PUBLIC_KEY_DISCRIMINATOR.to_vec();
+
+        let write_pubkey_ix = Instruction {
+            program_id: self.program_id,
+            accounts: vec![
+                solana_sdk::instruction::AccountMeta::new(pq_account, false),
+                solana_sdk::instruction::AccountMeta::new(temp_keypair.pubkey(), false),
+                solana_sdk::instruction::AccountMeta::new(keypair.pubkey(), true),
+                solana_sdk::instruction::AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
+            ],
+            data: instruction_data,
+        };
+
+        let recent_blockhash = self.rpc_client.get_latest_blockhash()?;
+        let transaction = Transaction::new_signed_with_payer(
+            &[create_account_ix, write_data_ix, write_pubkey_ix],
+            Some(&keypair.pubkey()),
+            &[&keypair, &temp_keypair],
+            recent_blockhash,
+        );
+
+        println!("Sending public key write transaction...");
+        let signature = self.rpc_client.send_and_confirm_transaction(&transaction)?;
+
+        println!("{}", "✅ SPHINCS+ Public Key Written!".green().bold());
+        println!("   Transaction: {}", signature.to_string().cyan());
         println!();
 
         Ok(())
@@ -225,16 +331,85 @@ impl VaultClient {
         Ok(())
     }
 
+    /// Close PQ account and reclaim rent
+    pub async fn close_pq_account(&self, wallet: Pubkey, keypair_path: &str, receiver: Option<Pubkey>) -> Result<()> {
+        println!("Wallet Address: {}", wallet.to_string().cyan());
+        println!();
+
+        let keypair = self.load_keypair(keypair_path)?;
+        let (pq_account, _) = self.derive_pq_account(wallet);
+        let receiver_pubkey = receiver.unwrap_or_else(|| keypair.pubkey());
+
+        println!("PQ Account (PDA): {}", pq_account.to_string().cyan());
+        println!("Rent Receiver: {}", receiver_pubkey.to_string().cyan());
+        println!();
+
+        // Check current status
+        let account_info = self.rpc_client.get_account(&pq_account)
+            .context("PQ account not found! Nothing to close.")?;
+
+        // Parse lock status - must be unlocked to close
+        let pubkey_len = u32::from_le_bytes(account_info.data[41..45].try_into().unwrap());
+        let tokens_locked_offset = 45 + pubkey_len as usize;
+        let is_locked = account_info.data[tokens_locked_offset] == 1;
+
+        if is_locked {
+            println!("{}", "❌ Cannot close PQ account while tokens are locked!".red().bold());
+            println!("   Unlock your vault first with: qdum-vault unlock");
+            println!();
+            return Err(anyhow::anyhow!("Tokens are locked - unlock first before closing"));
+        }
+
+        println!("Closing PQ account and reclaiming rent...");
+
+        let instruction_data = CLOSE_PQ_ACCOUNT_DISCRIMINATOR.to_vec();
+
+        let instruction = Instruction {
+            program_id: self.program_id,
+            accounts: vec![
+                solana_sdk::instruction::AccountMeta::new(pq_account, false),
+                solana_sdk::instruction::AccountMeta::new_readonly(keypair.pubkey(), true),
+                solana_sdk::instruction::AccountMeta::new(receiver_pubkey, false),
+            ],
+            data: instruction_data,
+        };
+
+        let recent_blockhash = self.rpc_client.get_latest_blockhash()?;
+        let transaction = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&keypair.pubkey()),
+            &[&keypair],
+            recent_blockhash,
+        );
+
+        let signature = self.rpc_client.send_and_confirm_transaction(&transaction)?;
+
+        println!();
+        println!("{}", "✅ PQ Account Closed!".green().bold());
+        println!("   Transaction: {}", signature.to_string().cyan());
+        println!("   View on Solscan: https://solscan.io/tx/{}?cluster=devnet", signature);
+        println!();
+        println!("💰 Rent refunded to: {}", receiver_pubkey.to_string().cyan());
+        println!("   (approximately ~0.003 SOL)");
+        println!();
+        println!("⚠️  Your PQ account is now closed. You will need to re-register");
+        println!("   if you want to use quantum-resistant features again.");
+        println!();
+
+        Ok(())
+    }
+
     /// Unlock the vault (multi-step SPHINCS+ verification process)
     pub async fn unlock_vault(
         &self,
         wallet: Pubkey,
         keypair_path: &str,
         sphincs_privkey: &[u8; 64],
-        mut progress_callback: Option<Box<dyn FnMut(usize, usize, String) + Send>>,
+        sphincs_pubkey: &[u8; 32],
+        progress_callback: Option<Box<dyn FnMut(usize, usize, String) + Send>>,
     ) -> Result<()> {
         // Wrap entire function to catch and log errors
-        let result = self.unlock_vault_inner(wallet, keypair_path, sphincs_privkey, progress_callback).await;
+        let result = self.unlock_vault_inner(wallet, keypair_path, sphincs_privkey, sphincs_pubkey, progress_callback).await;
 
         match &result {
             Ok(_) => {
@@ -255,6 +430,7 @@ impl VaultClient {
         wallet: Pubkey,
         keypair_path: &str,
         sphincs_privkey: &[u8; 64],
+        sphincs_pubkey: &[u8; 32],
         mut progress_callback: Option<Box<dyn FnMut(usize, usize, String) + Send>>,
     ) -> Result<()> {
         println!("{}", "╔═══════════════════════════════════════════════════════════╗".on_black().bright_magenta());
@@ -291,10 +467,6 @@ impl VaultClient {
         println!("{} {}", "Challenge:".bright_blue().bold(), hex::encode(challenge).bright_cyan());
         println!();
 
-        // Load SPHINCS+ public key
-        let key_manager = SphincsKeyManager::new(None)?;
-        let sphincs_pubkey = key_manager.load_public_key(None)?;
-
         // Calculate total steps for progress tracking
         // 1 signature gen + 1 init storage + 10 upload chunks + 33 verify steps + 1 finalize = 46 total
         const CHUNK_SIZE: usize = 800;
@@ -320,14 +492,28 @@ impl VaultClient {
         spinner.set_message(format!("{}", "⚛️  Generating SPHINCS+ signature...".bright_white()));
 
         // Generate signature
+        let key_manager = SphincsKeyManager::new(None)?;
         let signature = key_manager.sign_message(challenge, sphincs_privkey)?;
 
         spinner.finish_with_message(format!("{} {} bytes", "✓ Signature generated:".bright_green(), SPHINCS_SIGNATURE_SIZE.to_string().bright_yellow()));
         println!();
 
-        // Use fixed identifier to reuse PDAs across unlocks (saves ~0.07 SOL rent after first unlock)
-        // The on-chain program supports PDA reinitialization with init_if_needed constraint
-        let unique_identifier = "current".to_string();
+        // Debug logging
+        println!("{}", "═══════════════════════════════════════════════════════════".bright_yellow());
+        println!("{} {}", "DEBUG: SPHINCS Public Key (unlock):".bright_yellow().bold(), hex::encode(sphincs_pubkey).bright_cyan());
+
+        // Use SPHINCS public key hash as identifier to avoid conflicts from corrupted PDAs
+        // Each vault has unique SPHINCS keys, so this gives each vault its own storage
+        // while still allowing reuse across multiple unlocks of the same vault
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(sphincs_pubkey);
+        let pubkey_hash = hasher.finalize();
+        let unique_identifier = hex::encode(&pubkey_hash[..8]);
+
+        println!("{} {}", "DEBUG: Storage Identifier:".bright_yellow().bold(), unique_identifier.bright_cyan());
+        println!("{}", "═══════════════════════════════════════════════════════════".bright_yellow());
+        println!();
 
         // Derive signature storage PDA
         let (signature_storage, _) = Pubkey::find_program_address(
@@ -362,7 +548,7 @@ impl VaultClient {
         pb_phase1.set_message(format!("{}", "Initializing storage...".bright_white()));
 
         // Always reinitialize to reset state (program allows reinit of existing PDAs)
-        self.initialize_sphincs_storage(&keypair, &signature_storage, &unique_identifier, &sphincs_pubkey, challenge).await?;
+        self.initialize_sphincs_storage(&keypair, &signature_storage, &unique_identifier, sphincs_pubkey, challenge).await?;
         pb_phase1.inc(1);
 
         for i in 0..total_chunks {
@@ -416,7 +602,7 @@ impl VaultClient {
             &signature_storage,
             &unique_identifier,
             challenge,
-            &sphincs_pubkey,
+            sphincs_pubkey,
             0, // unlock_duration_slots (0 = immediate unlock)
         ).await?;
         pb_phase2.inc(1);
@@ -977,7 +1163,7 @@ impl VaultClient {
         };
 
         // Create status table
-        use comfy_table::{Table, presets::UTF8_FULL, Cell};
+        use comfy_table::{Table, presets::UTF8_FULL};
 
         let mut status_table = Table::new();
         status_table.load_preset(UTF8_FULL);
@@ -1077,6 +1263,12 @@ impl VaultClient {
                 Ok(0)
             }
         }
+    }
+
+    /// Get SOL balance (in lamports)
+    pub async fn get_sol_balance(&self, wallet: Pubkey) -> Result<u64> {
+        self.rpc_client.get_balance(&wallet)
+            .map_err(|e| anyhow::anyhow!("Failed to get SOL balance: {}", e))
     }
 
     /// Check token balance
@@ -1353,6 +1545,181 @@ impl VaultClient {
         println!();
 
         Ok(())
+    }
+
+    /// Get total locked QDUM across ALL network holders (with caching and batching)
+    /// Returns (total_locked, holder_count)
+    pub async fn get_network_locked_total(&self, mint: Pubkey, force_refresh: bool) -> Result<(f64, usize)> {
+
+        // Check cache first (5 minute expiry) unless force_refresh is true
+        if !force_refresh {
+            let cache_max_age = Duration::from_secs(5 * 60);
+            {
+                let cache = self.network_lock_cache.lock().unwrap();
+                if let Some(cached) = cache.as_ref() {
+                    if cached.mint == mint && !cached.is_expired(cache_max_age) {
+                        return Ok((cached.total_locked, cached.holder_count));
+                    }
+                }
+            }
+        }
+
+        // Cache miss or expired - query the network with optimized filters
+
+        // OPTIMIZATION: Use RPC filters to only fetch LOCKED accounts
+        // Account layout: discriminator(8) + owner(32) + algorithm(1) + pubkey_len(4) + pubkey_data(32) + is_locked(1)
+        // For SPHINCS+ (32 byte keys), is_locked is at offset 77 (8+32+1+4+32=77)
+        const LOCKED_OFFSET: usize = 77;
+
+        let config = RpcProgramAccountsConfig {
+            filters: Some(vec![
+                // Filter 1: Only accounts where is_locked == 1 at offset 77
+                RpcFilterType::Memcmp(Memcmp::new_raw_bytes(LOCKED_OFFSET, vec![1])),
+            ]),
+            account_config: RpcAccountInfoConfig {
+                encoding: Some(UiAccountEncoding::Base64),
+                data_slice: Some(UiDataSliceConfig {
+                    offset: 0,
+                    length: 100, // Only fetch first 100 bytes (enough for owner + lock status)
+                }),
+                ..RpcAccountInfoConfig::default()
+            },
+            ..RpcProgramAccountsConfig::default()
+        };
+
+        // Get only LOCKED PQ accounts (1 RPC call, highly filtered)
+        let accounts = self.rpc_client.get_program_accounts_with_config(&self.program_id, config)?;
+
+        let mut debug_log = format!("=== Network Lock Query (OPTIMIZED with RPC Filters) ===\n");
+        debug_log.push_str(&format!("Program ID: {}\n", self.program_id));
+        debug_log.push_str(&format!("Mint: {}\n", mint));
+        debug_log.push_str(&format!("Locked PQ accounts found (filtered): {}\n", accounts.len()));
+        debug_log.push_str(&format!("\n"));
+
+        // Step 1: Parse locked accounts to extract owner addresses
+        let mut locked_owners = Vec::new();
+
+        for (_pubkey, account) in &accounts {
+            let account_data = &account.data;
+
+            // Check if account has enough data (8 discriminator + 32 owner)
+            if account_data.len() >= 40 {
+                // Extract owner pubkey from account data
+                let mut owner_bytes = [0u8; 32];
+                owner_bytes.copy_from_slice(&account_data[8..40]);
+                let owner = Pubkey::new_from_array(owner_bytes);
+                locked_owners.push(owner);
+            }
+        }
+
+        debug_log.push_str(&format!("Valid locked accounts parsed: {}\n", locked_owners.len()));
+        debug_log.push_str(&format!("\n"));
+
+        // Step 2: Derive token account addresses for locked owners only
+        let token_program = &TOKEN_2022_PROGRAM_ID;
+        let token_accounts: Vec<Pubkey> = locked_owners
+            .iter()
+            .map(|owner| get_associated_token_address(owner, &mint, token_program))
+            .collect();
+
+        debug_log.push_str(&format!("Fetching balances for {} token accounts in batches...\n", token_accounts.len()));
+
+        // Step 3: Batch fetch all token accounts (100 at a time)
+        const BATCH_SIZE: usize = 100;
+        let mut all_balances: Vec<Option<u64>> = vec![None; token_accounts.len()];
+
+        for (i, chunk) in token_accounts.chunks(BATCH_SIZE).enumerate() {
+            match self.rpc_client.get_multiple_accounts(chunk) {
+                Ok(accounts_batch) => {
+                    for (j, account_opt) in accounts_batch.iter().enumerate() {
+                        let idx = i * BATCH_SIZE + j;
+                        if let Some(account) = account_opt {
+                            // Parse SPL token account data (amount is at offset 64)
+                            if account.data.len() >= 72 {
+                                let amount = u64::from_le_bytes(account.data[64..72].try_into().unwrap_or([0u8; 8]));
+                                all_balances[idx] = Some(amount);
+                            }
+                        }
+                    }
+                    debug_log.push_str(&format!("  Batch {}: fetched {} accounts\n", i + 1, chunk.len()));
+                }
+                Err(e) => {
+                    debug_log.push_str(&format!("  Batch {}: error - {}\n", i + 1, e));
+                }
+            }
+        }
+
+        debug_log.push_str(&format!("\n"));
+
+        // Step 4: Process results (only locked accounts)
+        let mut total_locked: u64 = 0;
+        let mut locked_count = 0;
+        let mut all_accounts_with_balance = Vec::new();
+
+        // Process locked accounts
+        for (i, owner) in locked_owners.iter().enumerate() {
+            if let Some(balance) = all_balances[i] {
+                if balance > 0 {
+                    total_locked += balance;
+                    locked_count += 1;
+                    all_accounts_with_balance.push((*owner, balance));
+                    debug_log.push_str(&format!("  LOCKED: {} - {} QDUM ✓\n", owner, balance as f64 / 1_000_000.0));
+                } else {
+                    locked_count += 1;
+                    debug_log.push_str(&format!("  LOCKED: {} - 0 QDUM (empty)\n", owner));
+                }
+            } else {
+                locked_count += 1;
+                debug_log.push_str(&format!("  LOCKED: {} - No token account\n", owner));
+            }
+        }
+
+        debug_log.push_str(&format!("\n=== SUMMARY ===\n"));
+        debug_log.push_str(&format!("Locked accounts: {}\n", locked_count));
+        debug_log.push_str(&format!("Total locked QDUM: {}\n", total_locked as f64 / 1_000_000.0));
+
+        debug_log.push_str(&format!("\n=== LOCKED ACCOUNTS WITH BALANCES ===\n"));
+        for (owner, balance) in &all_accounts_with_balance {
+            debug_log.push_str(&format!("  {} - {} QDUM 🔒\n",
+                owner,
+                *balance as f64 / 1_000_000.0
+            ));
+        }
+
+        // Write debug log
+        debug_log.push_str(&format!("\n=== PERFORMANCE ===\n"));
+        debug_log.push_str(&format!("OPTIMIZED with RPC filters:\n"));
+        debug_log.push_str(&format!("  - Filter: Only fetched LOCKED accounts at RPC level\n"));
+        debug_log.push_str(&format!("  - DataSlice: Only fetched first 100 bytes per account\n"));
+        debug_log.push_str(&format!("Total RPC calls: {} (1 filtered getProgramAccounts + {} batches of getMultipleAccounts)\n",
+            1 + (token_accounts.len() + BATCH_SIZE - 1) / BATCH_SIZE,
+            (token_accounts.len() + BATCH_SIZE - 1) / BATCH_SIZE));
+        debug_log.push_str(&format!("Without filter optimization: Would fetch ALL accounts (locked + unlocked) then filter locally\n"));
+        let _ = std::fs::write("/tmp/qdum-network-query.log", debug_log);
+
+        // Convert to QDUM (divide by 1_000_000)
+        let total_qdum = total_locked as f64 / 1_000_000.0;
+
+        // Update cache
+        {
+            let mut cache = self.network_lock_cache.lock().unwrap();
+            *cache = Some(NetworkLockCache {
+                total_locked: total_qdum,
+                holder_count: locked_count,
+                timestamp: SystemTime::now(),
+                mint,
+            });
+        }
+
+        Ok((total_qdum, locked_count))
+    }
+
+    /// Get the cache timestamp for display purposes
+    pub fn get_network_lock_cache_age(&self) -> Option<Duration> {
+        let cache = self.network_lock_cache.lock().unwrap();
+        cache.as_ref().and_then(|c| {
+            SystemTime::now().duration_since(c.timestamp).ok()
+        })
     }
 
 }
