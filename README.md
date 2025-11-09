@@ -1,6 +1,6 @@
 # pqcoin
 
-Post-quantum digital currency CLI - Quantum-resistant vault management tool for QDUM tokens with an interactive TUI dashboard.
+Post-quantum digital currency CLI - Quantum-resistant cryptocurrency vault with SPHINCS+ signatures and interactive TUI dashboard.
 
 ## Features
 
@@ -14,18 +14,18 @@ Post-quantum digital currency CLI - Quantum-resistant vault management tool for 
 
 ## Tokenomics
 
-The QDUM token has a **fixed total supply** of **4,294,967,296 QDUM** (2³² tokens) with 6 decimals.
+**Fixed total supply** of **4,294,967,296 tokens** (2³² with 6 decimals).
 
 **Distribution:**
-- **80% (3,435,973,836.8 QDUM)** - Initial liquidity pool (locked at program initialization)
-- **17% (730,144,440.32 QDUM)** - Protocol reserves (minted to dev wallet at initialization)
-- **3% (128,849,018.88 QDUM)** - Community airdrops (distributed at authority's discretion)
+- **80% (3,435,973,837)** - Initial liquidity pool (locked at program initialization)
+- **17% (730,144,440)** - Protocol reserves (minted to dev wallet at initialization)
+- **3% (128,849,019)** - Community airdrops (distributed at authority's discretion)
 
 **Minting Model:**
 - Initial distribution function mints 97% (80% + 17%) in a single transaction at program setup
 - Mint authority is then transferred to a PDA, preventing unauthorized minting
 - Airdrop function allows authority-controlled distribution of the remaining 3%
-- Total supply is cryptographically enforced - no tokens can be minted beyond 4,294,967,296 QDUM
+- Total supply is cryptographically enforced at 4,294,967,296 tokens
 
 ## Prerequisites
 
@@ -117,7 +117,7 @@ The dashboard will use your active vault profile from `~/.qdum/vaults.json`.
 
 **Dashboard Features:**
 - 📊 **Real-time vault status** - See if your vault is locked or unlocked
-- 💰 **Live balance display** - Monitor your QDUM token balance
+- 💰 **Live balance display** - Monitor your token balance
 - 🔓 **Interactive unlock** - Visual progress through 44-transaction verification
 - 💸 **Easy transfers** - Transfer tokens with on-screen guidance
 - ⚡ **Quick actions** - Register, lock, and manage vault with keyboard shortcuts
@@ -162,7 +162,7 @@ The dashboard will use your active vault profile from `~/.qdum/vaults.json`.
 
 5. **Claim Airdrop**
 
-   Press `A` to claim 100 QDUM tokens (requires registered PQ account).
+   Press `A` to claim 100 tokens from the community airdrop pool (requires registered PQ account).
 
 6. **Lock Your Vault**
 
@@ -196,10 +196,10 @@ pqcoin balance
 pqcoin transfer <RECIPIENT_ADDRESS> <AMOUNT>
 
 # Bridge operations
-pqcoin bridge wrap <AMOUNT>    # Convert QDUM → pqQDUM
-pqcoin bridge unwrap <AMOUNT>  # Convert pqQDUM → QDUM
+pqcoin bridge wrap <AMOUNT>    # Convert to quantum-protected variant
+pqcoin bridge unwrap <AMOUNT>  # Convert back to standard tokens
 
-# Claim airdrop (100 QDUM, 24h cooldown)
+# Claim airdrop (100 tokens, 24h cooldown)
 pqcoin claim-airdrop
 
 # Vault management
