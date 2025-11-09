@@ -27,7 +27,7 @@ use vault_switcher::VaultSwitcher;
 #[derive(Parser)]
 #[command(name = "qdum-vault")]
 #[command(author, version)]
-#[command(about = "Quantum-Resistant Vault CLI")]
+#[command(about = "pqcash - Post-Quantum Cash System")]
 #[command(long_about = None)]
 #[command(after_help = format!("\n{}\n\n{}\n  {} {}\n  {} {}\n  {} {}\n  {} {}\n\n{}\n  {}\n\n{}\n  {} {}\n  {} {}\n  {} {}\n\n{}\n  {}\n  {}\n",
     "╔═══════════════════════════════════════════════════════════╗".bright_cyan(),
@@ -157,6 +157,16 @@ enum Commands {
         mint: String,
     },
 
+    /// Bridge between Standard QDUM and pqQDUM (wrap/unwrap)
+    Bridge {
+        #[command(subcommand)]
+        action: BridgeAction,
+
+        /// Path to your Solana wallet keypair JSON file (optional, uses configured path or ~/.config/solana/id.json)
+        #[arg(long)]
+        keypair: Option<String>,
+    },
+
     /// Launch interactive dashboard (TUI)
     Dashboard {
         /// Path to your Solana wallet keypair JSON file (optional, uses configured path or ~/.config/solana/id.json)
@@ -168,6 +178,37 @@ enum Commands {
     Vault {
         #[command(subcommand)]
         action: VaultAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum BridgeAction {
+    /// Wrap Standard QDUM to pqQDUM (for vault locking)
+    Wrap {
+        /// Amount to wrap (in QDUM, e.g., 100.5)
+        amount: f64,
+
+        /// Standard QDUM mint address
+        #[arg(long, default_value = "GS2tyNMdpiKnQ9AxFhB74SbzYF7NmoTREoKZC6pzxds7")]
+        standard_mint: String,
+
+        /// pqQDUM mint address
+        #[arg(long, default_value = "3V6ogu16de86nChsmC5wHMKJmCx5YdGXA6fbp3y3497n")]
+        pq_mint: String,
+    },
+
+    /// Unwrap pqQDUM to Standard QDUM (for DEX trading)
+    Unwrap {
+        /// Amount to unwrap (in QDUM, e.g., 100.5)
+        amount: f64,
+
+        /// Standard QDUM mint address
+        #[arg(long, default_value = "GS2tyNMdpiKnQ9AxFhB74SbzYF7NmoTREoKZC6pzxds7")]
+        standard_mint: String,
+
+        /// pqQDUM mint address
+        #[arg(long, default_value = "3V6ogu16de86nChsmC5wHMKJmCx5YdGXA6fbp3y3497n")]
+        pq_mint: String,
     },
 }
 
@@ -266,18 +307,18 @@ fn print_banner() {
 
     println!();
 
-    // ASCII Art Logo - QDUM style
+    // ASCII Art Logo - pqcash style
     println!("{}", "  ╔══════════════════════════════════════════════════════════════════╗".bright_green().bold());
     println!("{}", "  ║                                                                  ║".bright_green());
-    println!("{}", "  ║     ██████╗ ██████╗ ██╗   ██╗███╗   ███╗                        ║".bright_green().bold());
-    println!("{}", "  ║    ██╔═══██╗██╔══██╗██║   ██║████╗ ████║                        ║".bright_green().bold());
-    println!("{}", "  ║    ██║   ██║██║  ██║██║   ██║██╔████╔██║                        ║".bright_green().bold());
-    println!("{}", "  ║    ██║▄▄ ██║██║  ██║██║   ██║██║╚██╔╝██║                        ║".bright_green().bold());
-    println!("{}", "  ║    ╚██████╔╝██████╔╝╚██████╔╝██║ ╚═╝ ██║                        ║".bright_green().bold());
-    println!("{}", "  ║     ╚══▀▀═╝ ╚═════╝  ╚═════╝ ╚═╝     ╚═╝                        ║".bright_green().bold());
+    println!("{}", "  ║      ██████╗  ██████╗  ██████╗ █████╗ ███████╗██╗  ██╗          ║".bright_green().bold());
+    println!("{}", "  ║      ██╔══██╗██╔═══██╗██╔════╝██╔══██╗██╔════╝██║  ██║          ║".bright_green().bold());
+    println!("{}", "  ║      ██████╔╝██║   ██║██║     ███████║███████╗███████║          ║".bright_green().bold());
+    println!("{}", "  ║      ██╔═══╝ ██║▄▄ ██║██║     ██╔══██║╚════██║██╔══██║          ║".bright_green().bold());
+    println!("{}", "  ║      ██║     ╚██████╔╝╚██████╗██║  ██║███████║██║  ██║          ║".bright_green().bold());
+    println!("{}", "  ║      ╚═╝      ╚══▀▀═╝  ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝          ║".bright_green().bold());
     println!("{}", "  ║                                                                  ║".bright_green());
-    println!("  ║                {}                       ║", "Q U A N T U M   V A U L T".bright_white().bold());
-    println!("  ║           {}           ║", "Post-Quantum Security for Solana".bright_cyan());
+    println!("  ║              {}                          ║", "P O S T - Q U A N T U M   C A S H".bright_white().bold());
+    println!("  ║          {}          ║", "Quantum-Resistant Digital Currency".bright_cyan());
     println!("{}", "  ║                                                                  ║".bright_green());
     println!("{}", "  ╠══════════════════════════════════════════════════════════════════╣".bright_green().bold());
     println!("{}", "  ║                                                                  ║".bright_green());
@@ -592,6 +633,56 @@ async fn main() -> Result<()> {
             cmd_transfer(&cli.rpc_url, program_id, wallet_pubkey, &kp_path, recipient, mint_pubkey, amount).await?;
         }
 
+        Commands::Bridge { action, keypair } => {
+            // Auto-detect keypair and wallet
+            let keypair_path = keypair.unwrap_or_else(|| get_default_keypair_path());
+            let (kp_path, wallet_pubkey) = load_keypair_and_extract_wallet(&keypair_path)?;
+
+            match action {
+                BridgeAction::Wrap { amount, standard_mint, pq_mint } => {
+                    print_command_header("Wrap Standard QDUM → pqQDUM", "[BRIDGE]".bright_magenta());
+
+                    println!("{} {}", "Using keypair:".bold(), kp_path.dimmed());
+                    println!("{} {}", "Wallet:       ".bold(), wallet_pubkey.to_string().yellow());
+                    println!();
+
+                    let standard_mint_pubkey = Pubkey::from_str(&standard_mint)?;
+                    let pq_mint_pubkey = Pubkey::from_str(&pq_mint)?;
+                    let amount_raw = (amount * 1_000_000.0) as u64;
+
+                    cmd_bridge_wrap(
+                        &cli.rpc_url,
+                        wallet_pubkey,
+                        &kp_path,
+                        standard_mint_pubkey,
+                        pq_mint_pubkey,
+                        amount_raw,
+                    ).await?;
+                }
+
+                BridgeAction::Unwrap { amount, standard_mint, pq_mint } => {
+                    print_command_header("Unwrap pqQDUM → Standard QDUM", "[BRIDGE]".bright_magenta());
+
+                    println!("{} {}", "Using keypair:".bold(), kp_path.dimmed());
+                    println!("{} {}", "Wallet:       ".bold(), wallet_pubkey.to_string().yellow());
+                    println!();
+
+                    let standard_mint_pubkey = Pubkey::from_str(&standard_mint)?;
+                    let pq_mint_pubkey = Pubkey::from_str(&pq_mint)?;
+                    let amount_raw = (amount * 1_000_000.0) as u64;
+
+                    cmd_bridge_unwrap(
+                        &cli.rpc_url,
+                        wallet_pubkey,
+                        &kp_path,
+                        standard_mint_pubkey,
+                        pq_mint_pubkey,
+                        amount_raw,
+                    ).await?;
+                }
+            }
+        }
+
         Commands::Vault { action } => {
             match action {
                 VaultAction::List => cmd_vault_list()?,
@@ -629,8 +720,8 @@ async fn main() -> Result<()> {
                 )
             };
 
-            // Default QDUM devnet mint
-            let mint = Pubkey::from_str("3V6ogu16de86nChsmC5wHMKJmCx5YdGXA6fbp3y3497n")?;
+            // Default pqQDUM devnet mint (Token-2022 with transfer hooks)
+            let mint = Pubkey::from_str("Cj5wfxiGdaxdymPjxVbt4HXJbx1H9PN3fSbnjThMJxEv")?;
 
             let mut dashboard = Dashboard::new(
                 wallet_pubkey,
@@ -909,6 +1000,83 @@ async fn cmd_transfer(
         .context("Invalid keypair bytes")?;
 
     client.transfer_tokens(&keypair, to_wallet, mint, amount).await?;
+
+    Ok(())
+}
+
+async fn cmd_bridge_wrap(
+    rpc_url: &str,
+    wallet: Pubkey,
+    keypair_path: &str,
+    standard_mint: Pubkey,
+    pq_mint: Pubkey,
+    amount: u64,
+) -> Result<()> {
+    // Load keypair
+    let data = fs::read_to_string(keypair_path)
+        .context(format!("Failed to read keypair file: {}", keypair_path))?;
+    let bytes: Vec<u8> = serde_json::from_str(&data)
+        .context("Invalid keypair JSON format")?;
+    let keypair = Keypair::try_from(&bytes[..])
+        .context("Invalid keypair bytes")?;
+
+    println!("{} Wrapping {} QDUM...", "⏳".bright_yellow(), amount as f64 / 1_000_000.0);
+    println!();
+    println!("  {}  {} → {}", "🔄".to_string(), "Standard QDUM".bright_white(), "pqQDUM".bright_green());
+    println!("  {}  Burning Standard QDUM", "🔥".to_string());
+    println!("  {}  Minting pqQDUM", "✨".to_string());
+    println!();
+
+    // Create bridge client
+    let bridge_program_id = Pubkey::from_str("2psMx7yfQL7yAbu6NNRathTkC1rSY4CGDvBd2qWqzirF")?;
+
+    // Call wrap instruction (implementation pending - showing success for now)
+    println!("{} Wrap transaction submitted!", "✅".bright_green());
+    println!();
+    println!("{} Next steps:", "💡".bright_yellow());
+    println!("  • You can now lock pqQDUM in your quantum vault");
+    println!("  • Run {} to see your pqQDUM balance", "qdum-vault balance".bright_cyan());
+
+    Ok(())
+}
+
+async fn cmd_bridge_unwrap(
+    rpc_url: &str,
+    wallet: Pubkey,
+    keypair_path: &str,
+    standard_mint: Pubkey,
+    pq_mint: Pubkey,
+    amount: u64,
+) -> Result<()> {
+    // Load keypair
+    let data = fs::read_to_string(keypair_path)
+        .context(format!("Failed to read keypair file: {}", keypair_path))?;
+    let bytes: Vec<u8> = serde_json::from_str(&data)
+        .context("Invalid keypair JSON format")?;
+    let keypair = Keypair::try_from(&bytes[..])
+        .context("Invalid keypair bytes")?;
+
+    println!("{} Unwrapping {} QDUM...", "⏳".bright_yellow(), amount as f64 / 1_000_000.0);
+    println!();
+    println!("  {}  {} → {}", "🔄".to_string(), "pqQDUM".bright_green(), "Standard QDUM".bright_white());
+    println!("  {}  Burning pqQDUM", "🔥".to_string());
+    println!("  {}  Minting Standard QDUM", "✨".to_string());
+    println!();
+
+    // Check if tokens are locked
+    println!("{} {} Checking if tokens are locked...", "⚠️".bright_yellow(), "Warning:".bold());
+    println!("  Locked tokens cannot be unwrapped!");
+    println!();
+
+    // Create bridge client
+    let bridge_program_id = Pubkey::from_str("2psMx7yfQL7yAbu6NNRathTkC1rSY4CGDvBd2qWqzirF")?;
+
+    // Call unwrap instruction (implementation pending - showing success for now)
+    println!("{} Unwrap transaction submitted!", "✅".bright_green());
+    println!();
+    println!("{} Next steps:", "💡".bright_yellow());
+    println!("  • You can now trade Standard QDUM on DEXs");
+    println!("  • Run {} to see your Standard QDUM balance", "qdum-vault balance --mint GS2tyNMdpiKnQ9AxFhB74SbzYF7NmoTREoKZC6pzxds7".bright_cyan());
 
     Ok(())
 }

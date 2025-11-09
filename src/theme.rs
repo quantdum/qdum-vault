@@ -1,112 +1,140 @@
-// Cyberpunk-inspired color theme for qdum-vault
-// Dark backgrounds with neon accents for a futuristic crypto aesthetic
+// Glassmorphic tech-inspired theme for qdum-vault
+// Modern design with layered depth, vibrant accents, and clean aesthetics
 
 use ratatui::style::Color;
 
 pub struct Theme;
 
 impl Theme {
-    // Base colors - Dark cyberpunk backgrounds
-    pub const BASE: Color = Color::Rgb(10, 10, 20);         // Very dark blue-black
-    pub const MANTLE: Color = Color::Rgb(15, 15, 25);       // Slightly lighter
-    pub const CRUST: Color = Color::Rgb(5, 5, 15);          // Darkest background
-    pub const PANEL_BG: Color = Color::Rgb(12, 12, 22);     // Panel background
+    // Base colors - Deep tech backgrounds with subtle gradients
+    pub const BASE: Color = Color::Rgb(8, 8, 18);           // Deep space black-blue
+    pub const MANTLE: Color = Color::Rgb(12, 12, 24);       // Slightly elevated
+    pub const CRUST: Color = Color::Rgb(4, 4, 12);          // Absolute black
 
-    // Surface layers - For elevated elements
-    pub const SURFACE0: Color = Color::Rgb(20, 20, 35);     // Elevated surface
-    pub const SURFACE1: Color = Color::Rgb(25, 25, 40);     // More elevated
-    pub const SURFACE2: Color = Color::Rgb(30, 30, 45);     // Highest elevation
+    // Glassmorphic panel backgrounds - Layered depth effect
+    pub const PANEL_BG: Color = Color::Rgb(14, 14, 28);     // Main glass panels
+    pub const GLASS_1: Color = Color::Rgb(18, 18, 32);      // First glass layer
+    pub const GLASS_2: Color = Color::Rgb(22, 22, 38);      // Second glass layer
+    pub const GLASS_3: Color = Color::Rgb(26, 26, 44);      // Third glass layer
+    pub const GLASS_ACCENT: Color = Color::Rgb(28, 32, 48); // Glass with blue tint
 
-    // Text colors - High contrast for readability
-    pub const TEXT: Color = Color::Rgb(255, 255, 255);      // Pure white primary text
-    pub const SUBTEXT1: Color = Color::Rgb(220, 220, 230);  // Light gray secondary
-    pub const SUBTEXT0: Color = Color::Rgb(180, 180, 200);  // Medium gray tertiary
-    pub const OVERLAY2: Color = Color::Rgb(140, 140, 160);  // Muted text
-    pub const OVERLAY1: Color = Color::Rgb(100, 100, 120);  // Very muted
-    pub const DIM: Color = Color::Rgb(60, 60, 80);          // Dim/disabled text
+    // Surface layers - For elevated elements with depth
+    pub const SURFACE0: Color = Color::Rgb(20, 24, 36);     // Elevated surface
+    pub const SURFACE1: Color = Color::Rgb(24, 28, 42);     // More elevated
+    pub const SURFACE2: Color = Color::Rgb(28, 32, 48);     // Highest elevation
 
-    // Neon accent colors - Cyberpunk aesthetic
-    pub const CYAN_NEON: Color = Color::Rgb(0, 255, 255);   // Bright cyan - headers
-    pub const BLUE_NEON: Color = Color::Rgb(0, 150, 255);   // Blue - info
-    pub const PURPLE_NEON: Color = Color::Rgb(180, 0, 255); // Purple - quantum/crypto
-    pub const PINK_NEON: Color = Color::Rgb(255, 0, 180);   // Pink - special
-    pub const GREEN_NEON: Color = Color::Rgb(0, 255, 150);  // Green - success/unlocked
-    pub const RED_NEON: Color = Color::Rgb(255, 0, 100);    // Red - error/locked
-    pub const YELLOW_NEON: Color = Color::Rgb(255, 255, 0); // Yellow - warning/selection
-    pub const ORANGE_NEON: Color = Color::Rgb(255, 150, 0); // Orange - emphasis
+    // Text colors - Crystal clear with hierarchy
+    pub const TEXT: Color = Color::Rgb(255, 255, 255);      // Pure white primary
+    pub const TEXT_BRIGHT: Color = Color::Rgb(240, 245, 255); // Bright white with blue tint
+    pub const SUBTEXT1: Color = Color::Rgb(200, 210, 230);  // Primary gray
+    pub const SUBTEXT0: Color = Color::Rgb(160, 170, 200);  // Secondary gray
+    pub const OVERLAY2: Color = Color::Rgb(120, 130, 160);  // Tertiary gray
+    pub const OVERLAY1: Color = Color::Rgb(80, 90, 120);    // Muted gray
+    pub const DIM: Color = Color::Rgb(50, 55, 75);          // Very dim
 
-    // Muted versions for less aggressive use
-    pub const CYAN: Color = Color::Rgb(0, 200, 200);        // Muted cyan
-    pub const BLUE: Color = Color::Rgb(80, 150, 255);       // Muted blue
-    pub const PURPLE: Color = Color::Rgb(150, 80, 255);     // Muted purple
-    pub const GREEN: Color = Color::Rgb(80, 255, 150);      // Muted green
-    pub const RED: Color = Color::Rgb(255, 80, 120);        // Muted red
-    pub const YELLOW: Color = Color::Rgb(255, 220, 80);     // Muted yellow
+    // Vibrant neon accents - Modern tech palette
+    pub const CYAN_NEON: Color = Color::Rgb(0, 255, 255);   // Electric cyan
+    pub const CYAN_BRIGHT: Color = Color::Rgb(80, 255, 255); // Bright cyan glow
+    pub const BLUE_NEON: Color = Color::Rgb(50, 150, 255);  // Tech blue
+    pub const PURPLE_NEON: Color = Color::Rgb(180, 80, 255); // Quantum purple
+    pub const PINK_NEON: Color = Color::Rgb(255, 80, 200);  // Electric pink
+    pub const GREEN_NEON: Color = Color::Rgb(80, 255, 150); // Matrix green
+    pub const RED_NEON: Color = Color::Rgb(255, 80, 120);   // Alert red
+    pub const YELLOW_NEON: Color = Color::Rgb(255, 220, 0); // Warning yellow
+    pub const ORANGE_NEON: Color = Color::Rgb(255, 160, 50); // Accent orange
 
-    // Semantic color functions
+    // Softer accent colors - For subtle highlights
+    pub const CYAN: Color = Color::Rgb(60, 200, 220);       // Soft cyan
+    pub const BLUE: Color = Color::Rgb(100, 160, 255);      // Soft blue
+    pub const PURPLE: Color = Color::Rgb(160, 100, 255);    // Soft purple
+    pub const GREEN: Color = Color::Rgb(100, 220, 160);     // Soft green
+    pub const RED: Color = Color::Rgb(255, 100, 140);       // Soft red
+    pub const YELLOW: Color = Color::Rgb(255, 200, 100);    // Soft yellow
 
-    /// Border color for active/focused panels
+    // Border colors - Layered glass effect
+    pub const BORDER_BRIGHT: Color = Color::Rgb(80, 120, 180); // Active bright border
+    pub const BORDER_DIM: Color = Color::Rgb(40, 50, 70);      // Inactive dim border
+    pub const BORDER_GLOW: Color = Color::Rgb(0, 200, 255);    // Glowing border accent
+
+    // Semantic color functions - Modern glassmorphic style
+
+    /// Border color for active/focused panels - Bright glow
     pub const fn active_border() -> Color {
-        Self::CYAN_NEON
+        Self::BORDER_GLOW
     }
 
-    /// Border color for inactive panels
+    /// Border color for inactive panels - Subtle depth
     pub const fn inactive_border() -> Color {
-        Self::SURFACE1
+        Self::BORDER_DIM
     }
 
-    /// Color for table/section headers
+    /// Color for table/section headers - Bright cyan
     pub const fn header() -> Color {
-        Self::CYAN_NEON
+        Self::CYAN_BRIGHT
     }
 
-    /// Color for success states (unlocked, completed)
+    /// Color for success states (unlocked, completed) - Matrix green
     pub const fn success() -> Color {
         Self::GREEN_NEON
     }
 
-    /// Color for error states
+    /// Color for error states - Alert red
     pub const fn error() -> Color {
         Self::RED_NEON
     }
 
-    /// Color for warning states
+    /// Color for warning states - Warning yellow
     pub const fn warning() -> Color {
         Self::YELLOW_NEON
     }
 
-    /// Color for info/neutral states
+    /// Color for info/neutral states - Tech blue
     pub const fn info() -> Color {
         Self::BLUE_NEON
     }
 
-    /// Color for quantum/crypto operations
+    /// Color for quantum/crypto operations - Quantum purple
     pub const fn quantum() -> Color {
         Self::PURPLE_NEON
     }
 
-    /// Color for locked state
+    /// Color for locked state - Alert red
     pub const fn locked() -> Color {
         Self::RED_NEON
     }
 
-    /// Color for unlocked state
+    /// Color for unlocked state - Matrix green
     pub const fn unlocked() -> Color {
         Self::GREEN_NEON
     }
 
-    /// Color for selected/focused input
+    /// Color for selected/focused input - Warning yellow
     pub const fn selection() -> Color {
         Self::YELLOW_NEON
     }
 
-    /// Color for progress/in-progress operations
+    /// Color for progress/in-progress operations - Soft cyan
     pub const fn progress() -> Color {
         Self::CYAN
     }
 
-    /// Dim/muted border for sections
+    /// Dim border for subtle sections
     pub const fn section_border() -> Color {
-        Self::SURFACE2
+        Self::BORDER_DIM
+    }
+
+    /// Primary glass panel background
+    pub const fn glass_panel() -> Color {
+        Self::GLASS_1
+    }
+
+    /// Secondary glass layer (more elevated)
+    pub const fn glass_elevated() -> Color {
+        Self::GLASS_2
+    }
+
+    /// Tertiary glass layer (highest elevation)
+    pub const fn glass_top() -> Color {
+        Self::GLASS_3
     }
 }

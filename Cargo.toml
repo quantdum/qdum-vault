@@ -1,12 +1,12 @@
 [package]
-name = "qdum-vault"
+name = "pqcoin"
 version = "1.8.0"
 edition = "2021"
-authors = ["QDUM Team"]
-description = "Quantum-resistant vault CLI for Solana using SPHINCS+ post-quantum signatures"
+authors = ["pqcash Team"]
+description = "pqcoin - Post-quantum digital currency using SPHINCS+ signatures"
 readme = "README.md"
-homepage = "https://github.com/quantdum/qdum-vault"
-repository = "https://github.com/quantdum/qdum-vault"
+homepage = "https://github.com/quantdum/pqcoin"
+repository = "https://github.com/quantdum/pqcoin"
 license = "MIT"
 keywords = ["solana", "quantum", "post-quantum", "sphincs", "cryptography"]
 categories = ["command-line-utilities", "cryptography"]
@@ -19,6 +19,9 @@ clap = { version = "4.5", features = ["derive", "color"] }
 solana-sdk = "2.0"
 solana-client = "2.0"
 solana-account-decoder = "2.0"
+spl-token-2022 = { version = "4.0", features = ["no-entrypoint"] }
+spl-transfer-hook-interface = "0.7"
+spl-tlv-account-resolution = "0.7"
 
 # Post-quantum crypto
 fips205 = { version = "0.4", default-features = false, features = ["slh_dsa_sha2_128s", "default-rng"] }

@@ -30,12 +30,27 @@ const PQ_ACCOUNT_SEED: &[u8] = b"pq_account";
 /// SPL Token-2022 Program ID
 const TOKEN_2022_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
+/// QDUM Bridge Program ID
+const BRIDGE_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("2psMx7yfQL7yAbu6NNRathTkC1rSY4CGDvBd2qWqzirF");
+
+/// SPL Token Program ID (standard)
+const SPL_TOKEN_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+
+/// Associated Token Program ID
+const ASSOCIATED_TOKEN_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+
 /// Instruction discriminators (from IDL - quantdum_token.json)
 const INITIALIZE_PQ_ACCOUNT_DISCRIMINATOR: [u8; 8] = [185, 126, 40, 29, 205, 105, 111, 213];
 const WRITE_PUBLIC_KEY_DISCRIMINATOR: [u8; 8] = [69, 199, 141, 25, 213, 45, 192, 226];
 const LOCK_TOKENS_DISCRIMINATOR: [u8; 8] = [136, 11, 32, 232, 161, 117, 54, 211];
 const CLOSE_PQ_ACCOUNT_DISCRIMINATOR: [u8; 8] = [213, 32, 12, 184, 191, 154, 92, 97];
 const CLAIM_AIRDROP_DISCRIMINATOR: [u8; 8] = [137, 50, 122, 111, 89, 254, 8, 20];
+
+// Bridge discriminators (computed from Anchor sighash)
+// wrap = sha256("global:wrap")[..8]
+const BRIDGE_WRAP_DISCRIMINATOR: [u8; 8] = [178, 40, 10, 189, 228, 129, 186, 140];
+// unwrap = sha256("global:unwrap")[..8]
+const BRIDGE_UNWRAP_DISCRIMINATOR: [u8; 8] = [126, 175, 198, 14, 212, 69, 50, 44];
 
 // SPHINCS+ verification flow discriminators
 const INITIALIZE_SPHINCS_STORAGE_DISCRIMINATOR: [u8; 8] = [140, 15, 169, 242, 61, 148, 238, 70];
@@ -82,10 +97,34 @@ impl NetworkLockCache {
     }
 }
 
+#[derive(Clone)]
 pub struct VaultClient {
-    rpc_client: RpcClient,
+    rpc_client: Arc<RpcClient>,
     program_id: Pubkey,
     network_lock_cache: Arc<Mutex<Option<NetworkLockCache>>>,
+}
+
+/// Create associated token account instruction
+fn create_associated_token_account_instruction(
+    payer: &Pubkey,
+    wallet: &Pubkey,
+    mint: &Pubkey,
+    token_program: &Pubkey,
+) -> Instruction {
+    let associated_token = get_associated_token_address(wallet, mint, token_program);
+
+    Instruction {
+        program_id: ASSOCIATED_TOKEN_PROGRAM_ID,
+        accounts: vec![
+            solana_sdk::instruction::AccountMeta::new(*payer, true),
+            solana_sdk::instruction::AccountMeta::new(associated_token, false),
+            solana_sdk::instruction::AccountMeta::new_readonly(*wallet, false),
+            solana_sdk::instruction::AccountMeta::new_readonly(*mint, false),
+            solana_sdk::instruction::AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+            solana_sdk::instruction::AccountMeta::new_readonly(*token_program, false),
+        ],
+        data: vec![], // No data needed for ATA creation
+    }
 }
 
 impl VaultClient {
@@ -98,7 +137,7 @@ impl VaultClient {
         );
 
         Ok(Self {
-            rpc_client,
+            rpc_client: Arc::new(rpc_client),
             program_id,
             network_lock_cache: Arc::new(Mutex::new(None)),
         })
@@ -1337,8 +1376,16 @@ impl VaultClient {
     /// Get token balance without printing (for dashboard)
     /// Returns balance in base units (raw u64)
     pub async fn get_balance(&self, wallet: Pubkey, mint: Pubkey) -> Result<u64> {
-        // Derive ATA (Associated Token Account)
-        let ata = get_associated_token_address(&wallet, &mint, &TOKEN_2022_PROGRAM_ID);
+        // Check which token program the mint uses by fetching mint account
+        let mint_account = self.rpc_client.get_account(&mint)?;
+        let token_program_id = if mint_account.owner == TOKEN_2022_PROGRAM_ID {
+            &TOKEN_2022_PROGRAM_ID
+        } else {
+            &SPL_TOKEN_PROGRAM_ID
+        };
+
+        // Derive ATA (Associated Token Account) with correct token program
+        let ata = get_associated_token_address(&wallet, &mint, token_program_id);
 
         match self.rpc_client.get_account(&ata) {
             Ok(account_info) => {
@@ -1353,6 +1400,22 @@ impl VaultClient {
         }
     }
 
+    pub async fn token_account_exists(&self, wallet: Pubkey, mint: Pubkey) -> Result<bool> {
+        // Check which token program the mint uses by fetching mint account
+        let mint_account = self.rpc_client.get_account(&mint)?;
+        let token_program_id = if mint_account.owner == TOKEN_2022_PROGRAM_ID {
+            &TOKEN_2022_PROGRAM_ID
+        } else {
+            &SPL_TOKEN_PROGRAM_ID
+        };
+
+        // Derive ATA (Associated Token Account) with correct token program
+        let ata = get_associated_token_address(&wallet, &mint, token_program_id);
+
+        // Check if account exists
+        Ok(self.rpc_client.get_account(&ata).is_ok())
+    }
+
     /// Get SOL balance (in lamports)
     pub async fn get_sol_balance(&self, wallet: Pubkey) -> Result<u64> {
         self.rpc_client.get_balance(&wallet)
@@ -1365,8 +1428,16 @@ impl VaultClient {
         println!("Mint Address: {}", mint.to_string().cyan());
         println!();
 
-        // Derive ATA (Associated Token Account)
-        let ata = get_associated_token_address(&wallet, &mint, &TOKEN_2022_PROGRAM_ID);
+        // Check which token program the mint uses by fetching mint account
+        let mint_account = self.rpc_client.get_account(&mint)?;
+        let token_program_id = if mint_account.owner == TOKEN_2022_PROGRAM_ID {
+            &TOKEN_2022_PROGRAM_ID
+        } else {
+            &SPL_TOKEN_PROGRAM_ID
+        };
+
+        // Derive ATA (Associated Token Account) with correct token program
+        let ata = get_associated_token_address(&wallet, &mint, token_program_id);
 
         println!("Token Account (ATA): {}", ata.to_string().cyan());
         println!();
@@ -1430,17 +1501,27 @@ impl VaultClient {
         println!("Mint:         {}", mint.to_string().cyan());
         println!();
 
-        // Get sender and recipient token accounts (ATAs)
+        // Detect which token program this mint uses
+        let mint_account = self.rpc_client.get_account(&mint)?;
+        let token_program_id = if mint_account.owner == TOKEN_2022_PROGRAM_ID {
+            &TOKEN_2022_PROGRAM_ID
+        } else {
+            &SPL_TOKEN_PROGRAM_ID
+        };
+
+        println!("Token Program: {}", if *token_program_id == TOKEN_2022_PROGRAM_ID { "Token-2022" } else { "SPL Token" });
+
+        // Get sender and recipient token accounts (ATAs) with correct token program
         let sender_token_account = get_associated_token_address(
             &keypair.pubkey(),
             &mint,
-            &TOKEN_2022_PROGRAM_ID,
+            token_program_id,
         );
 
         let recipient_token_account = get_associated_token_address(
             &recipient,
             &mint,
-            &TOKEN_2022_PROGRAM_ID,
+            token_program_id,
         );
 
         // Derive PQ account PDA for sender (for transfer hook validation)
@@ -1464,28 +1545,33 @@ impl VaultClient {
 
         if current_balance < amount {
             println!("{}", "❌ Insufficient balance!".red().bold());
-            return Ok(());
+            return Err(anyhow::anyhow!("Insufficient balance for transfer"));
         }
 
-        // Check if PQ account exists and is locked
-        if let Ok(pq_account_info) = self.rpc_client.get_account(&pq_account) {
-            let pubkey_len = u32::from_le_bytes(pq_account_info.data[41..45].try_into().unwrap());
-            let tokens_locked_offset = 45 + pubkey_len as usize;
-            let is_locked = pq_account_info.data[tokens_locked_offset] == 1;
+        // Check if PQ account exists and is locked - ONLY for pqQDUM (Token-2022) transfers
+        if *token_program_id == TOKEN_2022_PROGRAM_ID {
+            if let Ok(pq_account_info) = self.rpc_client.get_account(&pq_account) {
+                let pubkey_len = u32::from_le_bytes(pq_account_info.data[41..45].try_into().unwrap());
+                let tokens_locked_offset = 45 + pubkey_len as usize;
+                let is_locked = pq_account_info.data[tokens_locked_offset] == 1;
 
-            if is_locked {
-                println!("{}", "⚠️  Your vault is LOCKED!".red().bold());
-                println!();
-                println!("Transfers are disabled while your vault is locked.");
-                println!("To unlock your vault, run: qdum-vault unlock");
-                println!();
-                return Ok(());
+                if is_locked {
+                    println!("{}", "⚠️  Your vault is LOCKED!".red().bold());
+                    println!();
+                    println!("pqQDUM transfers are disabled while your vault is locked.");
+                    println!("Standard QDUM can be transferred freely.");
+                    println!();
+                    return Err(anyhow::anyhow!("Vault is locked - cannot transfer pqQDUM"));
+                } else {
+                    println!("{}", "✓ Vault is unlocked - pqQDUM transfer allowed".green());
+                    println!();
+                }
             } else {
-                println!("{}", "✓ Vault is unlocked - transfer allowed".green());
+                println!("{}", "ℹ  No PQ account found - this is a pqQDUM transfer but account not registered".dimmed());
                 println!();
             }
         } else {
-            println!("{}", "ℹ  No PQ account found - proceeding with normal transfer".dimmed());
+            println!("{}", "✓ Standard QDUM - no vault lock required".green());
             println!();
         }
 
@@ -1536,7 +1622,7 @@ impl VaultClient {
                         solana_sdk::instruction::AccountMeta::new_readonly(recipient, false),
                         solana_sdk::instruction::AccountMeta::new_readonly(mint, false),
                         solana_sdk::instruction::AccountMeta::new_readonly(solana_sdk::system_program::id(), false),
-                        solana_sdk::instruction::AccountMeta::new_readonly(TOKEN_2022_PROGRAM_ID, false),
+                        solana_sdk::instruction::AccountMeta::new_readonly(*token_program_id, false),
                     ],
                     data: vec![],
                 };
@@ -1545,47 +1631,68 @@ impl VaultClient {
             }
         }
 
-        // Build standard Token-2022 TransferChecked instruction
-        // According to SPL Transfer Hook docs, we need to:
-        // 1. Create base TransferChecked instruction (4 accounts)
-        // 2. Read and resolve extra accounts from ExtraAccountMetaList PDA
-        // 3. Append those accounts to the instruction
+        // Build transfer instruction - different for SPL Token vs Token-2022
+        let transfer_ix = if *token_program_id == TOKEN_2022_PROGRAM_ID {
+            // Token-2022 with transfer hook - manually add extra accounts
+            // Create basic transfer instruction (4 accounts)
+            let mut transfer_ix = spl_token_2022::instruction::transfer_checked(
+                &TOKEN_2022_PROGRAM_ID,
+                &sender_token_account,
+                &mint,
+                &recipient_token_account,
+                &keypair.pubkey(),
+                &[],
+                amount,
+                6,
+            )?;
 
-        let mut instruction_data = Vec::new();
-        instruction_data.push(12); // TransferChecked discriminator
-        instruction_data.extend_from_slice(&amount.to_le_bytes());
-        instruction_data.push(6); // decimals
+            // Manually add transfer hook accounts (required for Token-2022 with transfer hooks)
+            // Based on working implementation in test-transfer.ts lines 185-214
 
-        // Build TransferChecked accounts following Token-2022 spec
-        // Analyzed from Phantom's successful transaction (2uhKM7acwx3Z...):
-        // Account order for TransferChecked with transfer hook:
-        // 0: source_account (writable)
-        // 1: mint (read-only)
-        // 2: destination_account (writable)
-        // 3: owner/authority (signer)
-        // 4: transfer_hook_program_id (read-only) ← CRITICAL! Token-2022 needs this to invoke the hook
-        // 5: extra_account_metas_pda (read-only)
-        // 6: pq_account (read-only)
+            // Derive ExtraAccountMetaList PDA
+            let (extra_account_meta_list, _) = Pubkey::find_program_address(
+                &[b"extra-account-metas", mint.as_ref()],
+                &self.program_id,
+            );
 
-        let (extra_account_meta_list, _) = Pubkey::find_program_address(
-            &[b"extra-account-metas", mint.as_ref()],
-            &self.program_id,
-        );
+            // Index 4: Transfer hook program ID (required by Token-2022 to invoke the hook)
+            transfer_ix.accounts.push(solana_sdk::instruction::AccountMeta::new_readonly(
+                self.program_id,
+                false,
+            ));
 
-        let accounts = vec![
-            solana_sdk::instruction::AccountMeta::new(sender_token_account, false),           // 0: source
-            solana_sdk::instruction::AccountMeta::new_readonly(mint, false),                  // 1: mint
-            solana_sdk::instruction::AccountMeta::new(recipient_token_account, false),        // 2: destination
-            solana_sdk::instruction::AccountMeta::new_readonly(keypair.pubkey(), true),       // 3: owner (signer)
-            solana_sdk::instruction::AccountMeta::new_readonly(self.program_id, false),       // 4: transfer hook program
-            solana_sdk::instruction::AccountMeta::new_readonly(extra_account_meta_list, false), // 5: extra metas PDA
-            solana_sdk::instruction::AccountMeta::new_readonly(pq_account, false),            // 6: PQ account
-        ];
+            // Index 5: ExtraAccountMetaList PDA (required by Token-2022)
+            transfer_ix.accounts.push(solana_sdk::instruction::AccountMeta::new_readonly(
+                extra_account_meta_list,
+                false,
+            ));
 
-        let transfer_ix = Instruction {
-            program_id: TOKEN_2022_PROGRAM_ID,
-            accounts,
-            data: instruction_data,
+            // Index 6: PQ Account PDA (extra account from ExtraAccountMetaList)
+            transfer_ix.accounts.push(solana_sdk::instruction::AccountMeta::new_readonly(
+                pq_account,
+                false,
+            ));
+
+            transfer_ix
+        } else {
+            // Simple SPL Token TransferChecked (no transfer hook)
+            let mut instruction_data = Vec::new();
+            instruction_data.push(12); // TransferChecked discriminator
+            instruction_data.extend_from_slice(&amount.to_le_bytes());
+            instruction_data.push(6); // decimals
+
+            let accounts = vec![
+                solana_sdk::instruction::AccountMeta::new(sender_token_account, false),           // 0: source
+                solana_sdk::instruction::AccountMeta::new_readonly(mint, false),                  // 1: mint
+                solana_sdk::instruction::AccountMeta::new(recipient_token_account, false),        // 2: destination
+                solana_sdk::instruction::AccountMeta::new_readonly(keypair.pubkey(), true),       // 3: owner (signer)
+            ];
+
+            Instruction {
+                program_id: SPL_TOKEN_PROGRAM_ID,
+                accounts,
+                data: instruction_data,
+            }
         };
 
         instructions.push(transfer_ix);
@@ -1610,8 +1717,87 @@ impl VaultClient {
         pb.set_message(format!("{}", "Building transaction...".bright_white()));
         pb.inc(1);
 
+        // Simulate first to get better error messages
+        let log_path = std::env::home_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("qdum-vault-transfer.log");
+
+        let mut log_file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)?;
+
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        writeln!(log_file, "\n========== Transfer Attempt: {} ==========", timestamp)?;
+        writeln!(log_file, "Token Program: {}", if *token_program_id == TOKEN_2022_PROGRAM_ID { "Token-2022" } else { "SPL Token" })?;
+        writeln!(log_file, "Mint: {}", mint)?;
+        writeln!(log_file, "Amount: {} base units", amount)?;
+        writeln!(log_file, "Simulating transaction...")?;
+
+        println!("Simulating transaction... (logs: {})", log_path.display());
+        match self.rpc_client.simulate_transaction(&transaction) {
+            Ok(sim_result) => {
+                if let Some(err) = sim_result.value.err {
+                    writeln!(log_file, "❌ Simulation failed: {:?}", err)?;
+
+                    // Extract a user-friendly error message (using ref to avoid move)
+                    let error_summary = if let Some(ref logs) = sim_result.value.logs {
+                        // Look for the actual error in logs
+                        logs.iter()
+                            .find(|log| log.contains("Error:"))
+                            .map(|log| {
+                                // Extract just the error part
+                                if let Some(pos) = log.find("Error:") {
+                                    log[pos..].to_string()
+                                } else {
+                                    log.to_string()
+                                }
+                            })
+                            .unwrap_or_else(|| format!("{:?}", err))
+                    } else {
+                        format!("{:?}", err)
+                    };
+
+                    // Now write logs to file (this moves sim_result.value.logs)
+                    if let Some(logs) = sim_result.value.logs {
+                        writeln!(log_file, "\nTransaction logs:")?;
+                        for log in logs {
+                            writeln!(log_file, "  {}", log)?;
+                        }
+                    }
+                    writeln!(log_file, "\nAccounts in transaction:")?;
+                    for (i, ix) in transaction.message.instructions.iter().enumerate() {
+                        writeln!(log_file, "  Instruction {}:", i)?;
+                        writeln!(log_file, "    Program: {}", transaction.message.account_keys[ix.program_id_index as usize])?;
+                        for (j, acc_idx) in ix.accounts.iter().enumerate() {
+                            writeln!(log_file, "    Account {}: {}", j, transaction.message.account_keys[*acc_idx as usize])?;
+                        }
+                    }
+                    log_file.flush()?;
+
+                    return Err(anyhow::anyhow!("{}", error_summary));
+                } else {
+                    writeln!(log_file, "✓ Simulation successful")?;
+                    println!("✓ Simulation successful");
+                }
+            }
+            Err(e) => {
+                writeln!(log_file, "⚠️  Could not simulate: {}", e)?;
+            }
+        }
+
         pb.set_message(format!("{}", "Sending to network...".bright_white()));
-        let signature = self.rpc_client.send_and_confirm_transaction(&transaction)?;
+        let signature = self.rpc_client.send_and_confirm_transaction(&transaction).map_err(|e| {
+            let _ = writeln!(log_file, "Transaction send failed: {:?}", e);
+            let _ = log_file.flush();
+            e
+        })?;
+
+        writeln!(log_file, "✓ Transaction successful: {}", signature)?;
+        log_file.flush()?;
         pb.inc(1);
 
         pb.set_message(format!("{}", "Confirming...".bright_white()));
@@ -1753,11 +1939,11 @@ impl VaultClient {
                     all_accounts_with_balance.push((*owner, balance));
                     debug_log.push_str(&format!("  LOCKED: {} - {} QDUM ✓\n", owner, balance as f64 / 1_000_000.0));
                 } else {
-                    locked_count += 1;
+                    // Don't count accounts with 0 balance
                     debug_log.push_str(&format!("  LOCKED: {} - 0 QDUM (empty)\n", owner));
                 }
             } else {
-                locked_count += 1;
+                // Don't count accounts with no token account for this mint
                 debug_log.push_str(&format!("  LOCKED: {} - No token account\n", owner));
             }
         }
@@ -1848,6 +2034,260 @@ impl VaultClient {
         let remaining = AIRDROP_CAP.saturating_sub(airdrop_distributed);
 
         Ok((airdrop_distributed, remaining))
+    }
+
+    /// Wrap Standard QDUM → pqQDUM
+    /// Burns standard QDUM and mints pqQDUM 1:1 using the bridge
+    pub async fn bridge_wrap(
+        &self,
+        keypair_path: &str,
+        amount: u64,
+        standard_mint: Pubkey,
+        pq_mint: Pubkey,
+    ) -> Result<String> {
+        use solana_sdk::signer::Signer as _;
+        use std::io::Write;
+
+        let log_path = "/tmp/dashboard-wrap.log";
+        let log_msg = |msg: String| {
+            // Only log to file, NOT to stdout (to avoid corrupting TUI)
+            if let Ok(mut file) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_path)
+            {
+                let _ = writeln!(file, "{}", msg);
+            }
+        };
+
+        let user_keypair = self.load_keypair(keypair_path)?;
+
+        log_msg(format!("🔄 Wrapping {} QDUM → pqQDUM...", amount as f64 / 1_000_000.0));
+        log_msg(format!("   User: {}", user_keypair.pubkey()));
+
+        // Derive bridge PDA
+        let (bridge_pda, bridge_bump) = Pubkey::find_program_address(
+            &[b"bridge"],
+            &BRIDGE_PROGRAM_ID,
+        );
+        log_msg(format!("   Bridge PDA: {}", bridge_pda));
+        log_msg(format!("   Bridge Bump: {}", bridge_bump));
+
+        // Get user's token accounts
+        let user_standard_account = get_associated_token_address(
+            &user_keypair.pubkey(),
+            &standard_mint,
+            &SPL_TOKEN_PROGRAM_ID,
+        );
+        let user_pq_account = get_associated_token_address(
+            &user_keypair.pubkey(),
+            &pq_mint,
+            &TOKEN_2022_PROGRAM_ID,
+        );
+
+        log_msg(format!("   Standard mint: {}", standard_mint));
+        log_msg(format!("   pqQDUM mint: {}", pq_mint));
+        log_msg(format!("   User Standard account: {}", user_standard_account));
+        log_msg(format!("   User pqQDUM account: {}", user_pq_account));
+
+        // Check if pq account exists, create if needed
+        if self.rpc_client.get_account(&user_pq_account).is_err() {
+            log_msg(format!("   Creating pqQDUM token account..."));
+            let create_ata_ix = create_associated_token_account_instruction(
+                &user_keypair.pubkey(),
+                &user_keypair.pubkey(),
+                &pq_mint,
+                &TOKEN_2022_PROGRAM_ID,
+            );
+            let recent_blockhash = self.rpc_client.get_latest_blockhash()?;
+            let create_tx = Transaction::new_signed_with_payer(
+                &[create_ata_ix],
+                Some(&user_keypair.pubkey()),
+                &[&user_keypair],
+                recent_blockhash,
+            );
+            self.rpc_client.send_and_confirm_transaction(&create_tx)?;
+            log_msg(format!("   ✓ pqQDUM account created"));
+        }
+
+        // Build wrap instruction
+        let mut instruction_data = Vec::new();
+        instruction_data.extend_from_slice(&BRIDGE_WRAP_DISCRIMINATOR);
+        instruction_data.extend_from_slice(&amount.to_le_bytes());
+
+        let accounts = vec![
+            solana_sdk::instruction::AccountMeta::new(user_keypair.pubkey(), true),  // user (signer)
+            solana_sdk::instruction::AccountMeta::new(bridge_pda, false),            // bridge
+            solana_sdk::instruction::AccountMeta::new_readonly(bridge_pda, false),   // bridge_authority (PDA)
+            solana_sdk::instruction::AccountMeta::new(standard_mint, false),         // standard_mint
+            solana_sdk::instruction::AccountMeta::new(user_standard_account, false), // user_standard_account
+            solana_sdk::instruction::AccountMeta::new(pq_mint, false),               // pq_mint
+            solana_sdk::instruction::AccountMeta::new(user_pq_account, false),       // user_pq_account
+            solana_sdk::instruction::AccountMeta::new_readonly(SPL_TOKEN_PROGRAM_ID, false), // token_program
+            solana_sdk::instruction::AccountMeta::new_readonly(TOKEN_2022_PROGRAM_ID, false), // token_2022_program
+        ];
+
+        let wrap_ix = Instruction {
+            program_id: BRIDGE_PROGRAM_ID,
+            accounts,
+            data: instruction_data,
+        };
+
+        // Send transaction
+        log_msg(format!("\n📤 Sending wrap transaction..."));
+        let recent_blockhash = self.rpc_client.get_latest_blockhash()?;
+        let transaction = Transaction::new_signed_with_payer(
+            &[wrap_ix],
+            Some(&user_keypair.pubkey()),
+            &[&user_keypair],
+            recent_blockhash,
+        );
+
+        log_msg(format!("   Transaction size: {} bytes", transaction.message_data().len()));
+
+        match self.rpc_client.send_and_confirm_transaction(&transaction) {
+            Ok(signature) => {
+                log_msg(format!("✅ Wrap complete!"));
+                log_msg(format!("   Transaction: {}", signature));
+                log_msg(format!("   Explorer: https://explorer.solana.com/tx/{}?cluster=devnet", signature));
+                Ok(signature.to_string())
+            }
+            Err(e) => {
+                log_msg(format!("\n❌ Wrap transaction failed!"));
+                log_msg(format!("   Error: {}", e));
+                log_msg(format!("   Bridge PDA: {}", bridge_pda));
+                log_msg(format!("   Standard mint: {}", standard_mint));
+                log_msg(format!("   pqQDUM mint: {}", pq_mint));
+                Err(e.into())
+            }
+        }
+    }
+
+    /// Unwrap pqQDUM → Standard QDUM
+    /// Burns pqQDUM and mints standard QDUM 1:1 using the bridge
+    pub async fn bridge_unwrap(
+        &self,
+        keypair_path: &str,
+        amount: u64,
+        standard_mint: Pubkey,
+        pq_mint: Pubkey,
+    ) -> Result<String> {
+        use solana_sdk::signer::Signer as _;
+        use std::io::Write;
+
+        let log_path = "/tmp/dashboard-unwrap.log";
+        let log_msg = |msg: String| {
+            // Only log to file, NOT to stdout (to avoid corrupting TUI)
+            if let Ok(mut file) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_path)
+            {
+                let _ = writeln!(file, "{}", msg);
+            }
+        };
+
+        let user_keypair = self.load_keypair(keypair_path)?;
+
+        log_msg(format!("🔄 Unwrapping {} pqQDUM → QDUM...", amount as f64 / 1_000_000.0));
+        log_msg(format!("   User: {}", user_keypair.pubkey()));
+
+        // Derive bridge PDA
+        let (bridge_pda, bridge_bump) = Pubkey::find_program_address(
+            &[b"bridge"],
+            &BRIDGE_PROGRAM_ID,
+        );
+        log_msg(format!("   Bridge PDA: {}", bridge_pda));
+        log_msg(format!("   Bridge Bump: {}", bridge_bump));
+
+        // Get user's token accounts
+        let user_pq_account = get_associated_token_address(
+            &user_keypair.pubkey(),
+            &pq_mint,
+            &TOKEN_2022_PROGRAM_ID,
+        );
+        let user_standard_account = get_associated_token_address(
+            &user_keypair.pubkey(),
+            &standard_mint,
+            &SPL_TOKEN_PROGRAM_ID,
+        );
+
+        log_msg(format!("   pqQDUM mint: {}", pq_mint));
+        log_msg(format!("   Standard mint: {}", standard_mint));
+        log_msg(format!("   User pqQDUM account: {}", user_pq_account));
+        log_msg(format!("   User Standard account: {}", user_standard_account));
+
+        // Check if standard account exists, create if needed
+        if self.rpc_client.get_account(&user_standard_account).is_err() {
+            log_msg(format!("   Creating Standard QDUM token account..."));
+            let create_ata_ix = create_associated_token_account_instruction(
+                &user_keypair.pubkey(),
+                &user_keypair.pubkey(),
+                &standard_mint,
+                &SPL_TOKEN_PROGRAM_ID,
+            );
+            let recent_blockhash = self.rpc_client.get_latest_blockhash()?;
+            let create_tx = Transaction::new_signed_with_payer(
+                &[create_ata_ix],
+                Some(&user_keypair.pubkey()),
+                &[&user_keypair],
+                recent_blockhash,
+            );
+            self.rpc_client.send_and_confirm_transaction(&create_tx)?;
+            log_msg(format!("   ✓ Standard QDUM account created"));
+        }
+
+        // Build unwrap instruction
+        let mut instruction_data = Vec::new();
+        instruction_data.extend_from_slice(&BRIDGE_UNWRAP_DISCRIMINATOR);
+        instruction_data.extend_from_slice(&amount.to_le_bytes());
+
+        let accounts = vec![
+            solana_sdk::instruction::AccountMeta::new(user_keypair.pubkey(), true),  // user (signer)
+            solana_sdk::instruction::AccountMeta::new(bridge_pda, false),            // bridge
+            solana_sdk::instruction::AccountMeta::new_readonly(bridge_pda, false),   // bridge_authority (PDA)
+            solana_sdk::instruction::AccountMeta::new(pq_mint, false),               // pq_mint
+            solana_sdk::instruction::AccountMeta::new(user_pq_account, false),       // user_pq_account
+            solana_sdk::instruction::AccountMeta::new(standard_mint, false),         // standard_mint
+            solana_sdk::instruction::AccountMeta::new(user_standard_account, false), // user_standard_account
+            solana_sdk::instruction::AccountMeta::new_readonly(SPL_TOKEN_PROGRAM_ID, false), // token_program
+            solana_sdk::instruction::AccountMeta::new_readonly(TOKEN_2022_PROGRAM_ID, false), // token_2022_program
+        ];
+
+        let unwrap_ix = Instruction {
+            program_id: BRIDGE_PROGRAM_ID,
+            accounts,
+            data: instruction_data,
+        };
+
+        // Send transaction
+        log_msg(format!("\n📤 Sending unwrap transaction..."));
+        let recent_blockhash = self.rpc_client.get_latest_blockhash()?;
+        let transaction = Transaction::new_signed_with_payer(
+            &[unwrap_ix],
+            Some(&user_keypair.pubkey()),
+            &[&user_keypair],
+            recent_blockhash,
+        );
+
+        log_msg(format!("   Transaction size: {} bytes", transaction.message_data().len()));
+
+        match self.rpc_client.send_and_confirm_transaction(&transaction) {
+            Ok(signature) => {
+                log_msg(format!("✅ Unwrap complete!"));
+                log_msg(format!("   Transaction: {}", signature));
+                log_msg(format!("   Explorer: https://explorer.solana.com/tx/{}?cluster=devnet", signature));
+                Ok(signature.to_string())
+            }
+            Err(e) => {
+                log_msg(format!("\n❌ Unwrap transaction failed!"));
+                log_msg(format!("   Error: {}", e));
+                log_msg(format!("   Bridge PDA: {}", bridge_pda));
+                log_msg(format!("   Standard mint: {}", standard_mint));
+                log_msg(format!("   pqQDUM mint: {}", pq_mint));
+                Err(e.into())
+            }
+        }
     }
 
 }
