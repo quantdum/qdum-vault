@@ -231,6 +231,6 @@ The program includes an `initial_distribution` instruction that can only be call
 ---
 
 For more information:
-- 📖 [GitHub Repository](https://github.com/quantdum/qdum-vault)
+- 📖 [GitHub Repository](https://github.com/quantdum/pqcoin)
 - 📊 [Token Tracker](https://solscan.io)
-- 🌐 [Website](https://github.com/quantdum/qdum-vault)
+- 🌐 [Website](https://github.com/quantdum/pqcoin)

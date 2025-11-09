@@ -1,6 +1,6 @@
 # Design Preview System
 
-This lets you rapidly test CLI design changes without rebuilding the entire qdum-vault project.
+This lets you rapidly test CLI design changes without rebuilding the entire pqcoin project.
 
 ## Quick Start
 

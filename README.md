@@ -1,6 +1,6 @@
-# QDUM Vault
+# pqcoin
 
-Quantum-resistant vault management tool for Quantdum tokens with an interactive TUI dashboard.
+Post-quantum digital currency CLI - Quantum-resistant vault management tool for QDUM tokens with an interactive TUI dashboard.
 
 ## Features
 
@@ -29,7 +29,7 @@ The QDUM token has a **fixed total supply** of **4,294,967,296 QDUM** (2³² tok
 
 ## Prerequisites
 
-Before installing QDUM Vault, you need Rust and Cargo installed on your system.
+Before installing pqcoin, you need Rust and Cargo installed on your system.
 
 ### Install Rust
 
@@ -74,26 +74,26 @@ Alternatively, you can use native Windows with [Visual Studio C++ Build Tools](h
 Once Rust is installed, simply run:
 
 ```bash
-cargo install qdum-vault
+cargo install pqcoin
 ```
 
-That's it! The `qdum-vault` command is now available globally.
+That's it! The `pqcoin` command is now available globally.
 
 ### Alternative Installation Methods
 
 #### Build from Source (GitHub)
 ```bash
-git clone https://github.com/quantdum/qdum-vault.git
-cd qdum-vault
+git clone https://github.com/quantdum/pqcoin.git
+cd pqcoin
 cargo install --path .
 ```
 
 #### Local Development
 ```bash
-git clone https://github.com/quantdum/qdum-vault.git
-cd qdum-vault
+git clone https://github.com/quantdum/pqcoin.git
+cd pqcoin
 cargo build
-./target/debug/qdum-vault --help
+./target/debug/pqcoin --help
 ```
 
 #### Quick Install Script
@@ -108,11 +108,12 @@ cargo build
 Launch the interactive dashboard for the best experience:
 
 ```bash
-qdum-vault dashboard \
-  --wallet YOUR_WALLET_ADDRESS \
-  --keypair ~/.config/solana/id.json \
-  --mint 3V6ogu16de86nChsmC5wHMKJmCx5YdGXA6fbp3y3497n
+pqcoin dashboard
+# Or simply:
+pqcoin
 ```
+
+The dashboard will use your active vault profile from `~/.qdum/vaults.json`.
 
 **Dashboard Features:**
 - 📊 **Real-time vault status** - See if your vault is locked or unlocked
@@ -130,74 +131,111 @@ qdum-vault dashboard \
 
 ### First Time Setup
 
-1. **Generate SPHINCS+ Keypair**
+1. **Initialize New Vault**
    ```bash
-   qdum-vault init
+   pqcoin init
    ```
 
-   Keys are saved to `~/.qdum/`:
-   - `sphincs_private.key` (64 bytes) - **Keep this safe!**
-   - `sphincs_public.key` (32 bytes)
+   This creates:
+   - SPHINCS+ keypair (32-byte public key, 64-byte private key)
+   - Solana wallet keypair
+   - Vault profile in `~/.qdum/vaults.json`
 
-2. **Launch Dashboard and Register**
+   **Keep your keys safe!** They're stored in `~/.qdum/<vault-name>-{pq-key,wallet}.json`
+
+2. **Fund Your Wallet**
    ```bash
-   qdum-vault dashboard \
-     --wallet YOUR_WALLET_ADDRESS \
-     --keypair ~/.config/solana/id.json \
-     --mint 3V6ogu16de86nChsmC5wHMKJmCx5YdGXA6fbp3y3497n
+   # Get devnet SOL for testing
+   solana airdrop 1 <YOUR_WALLET_ADDRESS> --url devnet
    ```
 
-   Press `R` to register your vault on-chain.
+3. **Launch Dashboard**
+   ```bash
+   pqcoin dashboard
+   # Or simply:
+   pqcoin
+   ```
 
-3. **Lock Your Vault**
+4. **Register On-Chain**
+
+   Press `R` in the dashboard to register your SPHINCS+ public key on-chain.
+
+5. **Claim Airdrop**
+
+   Press `A` to claim 100 QDUM tokens (requires registered PQ account).
+
+6. **Lock Your Vault**
 
    Press `L` to lock your vault and secure your tokens.
 
-4. **Unlock When Needed**
+7. **Unlock When Needed**
 
-   Press `U` to unlock - watch the quantum verification process in real-time!
+   Press `U` to unlock - watch the 44-step quantum verification process in real-time!
 
 ### CLI Commands (Alternative)
 
 For scripting or automation, you can use individual commands:
 
 ```bash
-# Register vault
-qdum-vault register --wallet YOUR_WALLET --keypair ~/.config/solana/id.json
+# Register vault on-chain
+pqcoin register
 
 # Lock vault
-qdum-vault lock --wallet YOUR_WALLET --keypair ~/.config/solana/id.json
+pqcoin lock
 
 # Unlock vault (44-transaction quantum verification)
-qdum-vault unlock --wallet YOUR_WALLET --keypair ~/.config/solana/id.json
+pqcoin unlock
 
-# Check status
-qdum-vault status --wallet YOUR_WALLET
+# Check vault status
+pqcoin status
 
 # Check balance
-qdum-vault balance --keypair ~/.config/solana/id.json --mint MINT_ADDRESS
+pqcoin balance
 
 # Transfer tokens
-qdum-vault transfer \
-  --to RECIPIENT_ADDRESS \
-  --amount 10000000000 \
-  --keypair ~/.config/solana/id.json \
-  --mint MINT_ADDRESS
+pqcoin transfer <RECIPIENT_ADDRESS> <AMOUNT>
+
+# Bridge operations
+pqcoin bridge wrap <AMOUNT>    # Convert QDUM → pqQDUM
+pqcoin bridge unwrap <AMOUNT>  # Convert pqQDUM → QDUM
+
+# Claim airdrop (100 QDUM, 24h cooldown)
+pqcoin claim-airdrop
+
+# Vault management
+pqcoin vault list              # List all vaults
+pqcoin vault switch            # Interactive vault switcher
+pqcoin vault create <NAME>     # Create new vault
+pqcoin vault show              # Show current vault details
 ```
 
-**Note:** Amount is in base units with 6 decimals (10,000 QDUM = 10000000000 base units)
+**Note:** Commands use the active vault from `~/.qdum/vaults.json`. Use `pqcoin vault switch` to change vaults.
 
 ## Configuration
 
-### Change RPC Endpoint
+### Vault Profiles
+
+pqcoin uses a multi-vault system stored in `~/.qdum/vaults.json`:
+
 ```bash
-qdum-vault --rpc-url https://api.mainnet-beta.solana.com <command>
+# Create additional vaults
+pqcoin vault create personal
+pqcoin vault create business
+
+# Switch between vaults
+pqcoin vault switch personal
+
+# List all vaults
+pqcoin vault list
 ```
 
-### Use Different Program
-```bash
-qdum-vault --program-id YOUR_PROGRAM_ID <command>
-```
+### Network Configuration
+
+Default: Devnet (`https://api.devnet.solana.com`)
+
+To use mainnet (when deployed):
+- Update `src/solana/client.rs` with mainnet RPC and program IDs
+- Rebuild: `cargo build --release`
 
 ## Architecture
 
@@ -241,7 +279,7 @@ cargo install --path .
 
 ### Uninstall
 ```bash
-cargo uninstall qdum-vault
+cargo uninstall pqcoin
 ```
 
 ## Troubleshooting

@@ -55,18 +55,18 @@ pub struct VaultConfig {
 ### 2. New Commands
 
 ```
-qdum-vault vault list              # List all vaults
-qdum-vault vault create <NAME>     # Create new vault profile
-qdum-vault vault switch <NAME>     # Switch active vault
-qdum-vault vault switch            # Interactive menu to select vault
-qdum-vault vault delete <NAME>     # Delete a vault profile
-qdum-vault vault show <NAME>       # Show vault details
-qdum-vault vault rename <OLD> <NEW> # Rename a vault
+pqcoin vault list              # List all vaults
+pqcoin vault create <NAME>     # Create new vault profile
+pqcoin vault switch <NAME>     # Switch active vault
+pqcoin vault switch            # Interactive menu to select vault
+pqcoin vault delete <NAME>     # Delete a vault profile
+pqcoin vault show <NAME>       # Show vault details
+pqcoin vault rename <OLD> <NEW> # Rename a vault
 ```
 
 ### 3. Interactive Vault Switcher
 
-When you run `qdum-vault vault switch` (no arguments), show interactive menu:
+When you run `pqcoin vault switch` (no arguments), show interactive menu:
 
 ```
 ╔═══════════════════════════════════════════════════════════╗
@@ -95,13 +95,13 @@ Once a vault is active, all commands use it automatically:
 
 ```bash
 # No need to specify --keypair every time!
-qdum-vault status           # Uses active vault
-qdum-vault lock             # Uses active vault
-qdum-vault unlock           # Uses active vault
-qdum-vault balance          # Uses active vault
+pqcoin status           # Uses active vault
+pqcoin lock             # Uses active vault
+pqcoin unlock           # Uses active vault
+pqcoin balance          # Uses active vault
 
 # Override if needed
-qdum-vault status --vault trading    # Use "trading" vault temporarily
+pqcoin status --vault trading    # Use "trading" vault temporarily
 ```
 
 ### 5. Dashboard Integration
@@ -316,7 +316,7 @@ Add vault switcher to dashboard:
 
 ```bash
 # Initialize first vault (automatically becomes active)
-$ qdum-vault init
+$ pqcoin init
 ✓ Generated SPHINCS+ keys
 ✓ Generated Solana keypair
 ✓ Created vault profile: "default"
@@ -330,7 +330,7 @@ Wallet: 7vZ8mpR3HqLqkFX2nM5Xq2M
 
 ```bash
 # Create new vault with auto-generated keys
-$ qdum-vault vault create trading --auto-generate --description "My trading wallet"
+$ pqcoin vault create trading --auto-generate --description "My trading wallet"
 ✓ Generated new keys
 ✓ Created vault profile: "trading"
 
@@ -338,7 +338,7 @@ Switch to this vault? [Y/n]: y
 ✓ Active vault: trading
 
 # Or create vault with existing keys
-$ qdum-vault vault create cold-storage
+$ pqcoin vault create cold-storage
 ? Solana keypair path: ~/.config/solana/cold-wallet.json
 ? SPHINCS+ public key: ~/.qdum/cold/sphincs_public.key
 ? SPHINCS+ private key: ~/.qdum/cold/sphincs_private.key
@@ -349,7 +349,7 @@ $ qdum-vault vault create cold-storage
 
 ```bash
 # Open interactive menu
-$ qdum-vault vault switch
+$ pqcoin vault switch
 
 # Shows TUI menu, user selects with arrows, press Enter
 # Menu disappears, new vault is active
@@ -361,7 +361,7 @@ $ qdum-vault vault switch
 ### Example 4: List All Vaults
 
 ```bash
-$ qdum-vault vault list
+$ pqcoin vault list
 
 ╔═══════════════════════════════════════════════════════════╗
 ║                     Your Vaults                           ║
@@ -387,20 +387,20 @@ $ qdum-vault vault list
 ║                                                           ║
 ╚═══════════════════════════════════════════════════════════╝
 
-Switch vault:    qdum-vault vault switch
-Create vault:    qdum-vault vault create <name>
-Delete vault:    qdum-vault vault delete <name>
+Switch vault:    pqcoin vault switch
+Create vault:    pqcoin vault create <name>
+Delete vault:    pqcoin vault delete <name>
 ```
 
 ### Example 5: Temporary Vault Override
 
 ```bash
 # Use different vault for one command
-$ qdum-vault balance --vault cold-storage
+$ pqcoin balance --vault cold-storage
 Balance: 500,000 QDUM
 
 # Active vault unchanged
-$ qdum-vault status
+$ pqcoin status
 Wallet: 7vZ8...Xq2M (Personal Wallet)
 Status: Unlocked
 ```
@@ -408,7 +408,7 @@ Status: Unlocked
 ### Example 6: Dashboard Quick Switch
 
 ```bash
-$ qdum-vault dashboard
+$ pqcoin dashboard
 
 # In dashboard, press 'V'
 # Interactive vault switcher appears as modal

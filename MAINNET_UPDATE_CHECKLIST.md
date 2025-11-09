@@ -1,8 +1,8 @@
-# QDUM Vault Mainnet Update Checklist
+# pqcoin Mainnet Update Checklist
 
 ## What Needs to Change for Mainnet
 
-After deploying the token to mainnet, update these values in qdum-vault:
+After deploying the token to mainnet, update these values in pqcoin:
 
 ### 1. Default RPC URL
 **Current**: `https://api.devnet.solana.com`
@@ -92,10 +92,10 @@ Edit `src/main.rs` line 44 to show mainnet RPC in help:
 cargo build --release
 
 # Test mainnet connection
-./target/release/qdum-vault --rpc-url https://api.mainnet-beta.solana.com status --wallet <ADDRESS>
+./target/release/pqcoin --rpc-url https://api.mainnet-beta.solana.com status --wallet <ADDRESS>
 
 # Verify correct defaults
-./target/release/qdum-vault --help
+./target/release/pqcoin --help
 ```
 
 ### Step 5: Update Version
@@ -104,7 +104,7 @@ Edit `Cargo.toml`:
 
 ```toml
 [package]
-name = "qdum-vault"
+name = "pqcoin"
 version = "2.0.0"  # Mainnet launch version
 ```
 
@@ -180,8 +180,8 @@ struct Cli {
 
 After updating for mainnet:
 
-- [ ] `qdum-vault --help` shows mainnet RPC
-- [ ] `qdum-vault status` connects to mainnet by default
+- [ ] `pqcoin --help` shows mainnet RPC
+- [ ] `pqcoin status` connects to mainnet by default
 - [ ] Default mint address is mainnet QDUM token
 - [ ] Solscan links open correctly (no devnet cluster param)
 - [ ] Dashboard connects to mainnet
