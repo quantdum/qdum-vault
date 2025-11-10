@@ -1,16 +1,16 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use crate::dashboard::types::{Dashboard, AppMode, ActionStep, TransferInputField};
+use crate::dashboard::types::{Dashboard, AppMode};
 use crate::solana::client::VaultClient;
 use crate::crypto::sphincs::SphincsKeyManager;
 
 impl Dashboard {
     pub fn execute_unlock(&mut self) {
-        self.mode = AppMode::UnlockPopup;
+        // Stay in Normal mode - will render splash animation in content area
         self.action_steps.clear();
-        self.needs_clear = true;  // Force terminal clear to prevent background artifacts
-        self.status_message = Some("Executing Unlock...".to_string());
-        self.pending_action = true;  // Set flag to execute on next loop
+        self.status_message = Some("Unlocking...".to_string());
+        // Execute immediately
+        self.perform_unlock_action();
     }
 
     pub fn perform_unlock_action(&mut self) {

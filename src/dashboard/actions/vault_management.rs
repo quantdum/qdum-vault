@@ -8,10 +8,10 @@ use crate::crypto::sphincs::SphincsKeyManager;
 
 impl Dashboard {
     pub fn execute_new_vault(&mut self) {
-        self.mode = AppMode::VaultSwitchPopup;
-        self.needs_clear = true;  // Force terminal clear to prevent background artifacts
+        // Stay in Normal mode - render vault list in content area
         self.action_steps.clear();
         self.new_vault_name.clear();
+        self.selected_action = 11;  // Set to Vaults action index
 
         // Load vault list
         if let Ok(config) = VaultConfig::load() {
@@ -102,6 +102,12 @@ impl Dashboard {
                                     self.keypair_path = PathBuf::from(&vault.solana_keypair_path);
                                     self.sphincs_public_key_path = vault.sphincs_public_key_path.clone();
                                     self.sphincs_private_key_path = vault.sphincs_private_key_path.clone();
+
+                                    // IMPORTANT: Clear all cached vault data to force refresh
+                                    self.vault_status = None;
+                                    self.balance = None;
+                                    self.pq_balance = None;
+                                    self.standard_balance = None;
 
                                     // Close vault management popup
                                     self.mode = AppMode::Normal;

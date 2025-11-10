@@ -419,6 +419,146 @@ fn load_keypair_and_extract_wallet(keypair_path: &str) -> Result<(String, Pubkey
     Ok((keypair_path.to_string(), wallet_pubkey))
 }
 
+fn show_splash_screen() -> Result<()> {
+    use ratatui::{
+        backend::CrosstermBackend,
+        Terminal,
+        layout::{Alignment, Constraint, Direction, Layout},
+        style::{Color, Modifier, Style},
+        text::{Line, Span},
+        widgets::{Block, Paragraph},
+    };
+    use crossterm::{
+        execute,
+        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    };
+    use std::io::stdout;
+
+    // Setup terminal
+    enable_raw_mode()?;
+    let mut stdout = stdout();
+    execute!(stdout, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    terminal.clear()?;
+
+    // Glitch characters for animation
+    let glitch_chars = vec!["█", "▓", "▒", "░", "▀", "▄", "▌", "▐", "■", "□"];
+
+    // Animate splash screen for 4 seconds
+    let start = std::time::Instant::now();
+    let duration = std::time::Duration::from_secs(4);
+
+    while start.elapsed() < duration {
+        // Render splash screen with animated glitch
+        terminal.draw(|f| {
+            let size = f.area();
+
+            // Center the content
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Percentage(35),
+                    Constraint::Min(10),
+                    Constraint::Percentage(35),
+                ])
+                .split(size);
+
+            // Generate random glitch pattern
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let seed = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as usize;
+
+            let glitch_top = format!("{}{}{}{}",
+                glitch_chars[seed % glitch_chars.len()],
+                glitch_chars[(seed + 1) % glitch_chars.len()],
+                glitch_chars[(seed + 2) % glitch_chars.len()],
+                glitch_chars[(seed + 3) % glitch_chars.len()],
+            );
+
+            let glitch_mid = format!(" {}{}{}{}{} ",
+                glitch_chars[(seed + 4) % glitch_chars.len()],
+                glitch_chars[(seed + 5) % glitch_chars.len()],
+                glitch_chars[(seed + 6) % glitch_chars.len()],
+                glitch_chars[(seed + 7) % glitch_chars.len()],
+                glitch_chars[(seed + 8) % glitch_chars.len()],
+            );
+
+            let glitch_bot = format!("{}{}{}",
+                glitch_chars[(seed + 9) % glitch_chars.len()],
+                glitch_chars[(seed + 10) % glitch_chars.len()],
+                glitch_chars[(seed + 11) % glitch_chars.len()],
+            );
+
+            // Normal text with glitch effect - white background theme
+            let title_lines = vec![
+                Line::from(""),
+                Line::from(""),
+                Line::from(""),
+                Line::from(""),
+                Line::from(""),
+                // Glitch effect - animated (darker colors for white background)
+                Line::from(vec![
+                    Span::styled(glitch_top.clone(), Style::default().fg(Color::Rgb(0, 150, 200))),
+                    Span::styled(glitch_mid.clone(), Style::default().fg(Color::Rgb(140, 140, 140))),
+                    Span::styled(glitch_bot.clone(), Style::default().fg(Color::Rgb(180, 0, 200))),
+                ]),
+                Line::from(""),
+                // Main text - dark purple theme on white
+                Line::from(vec![
+                    Span::styled("P", Style::default().fg(Color::Rgb(120, 60, 200)).add_modifier(Modifier::BOLD)),
+                    Span::styled("O", Style::default().fg(Color::Rgb(140, 80, 220)).add_modifier(Modifier::BOLD)),
+                    Span::styled("S", Style::default().fg(Color::Rgb(120, 60, 200)).add_modifier(Modifier::BOLD)),
+                    Span::styled("T", Style::default().fg(Color::Rgb(100, 50, 180)).add_modifier(Modifier::BOLD)),
+                    Span::styled("  ", Style::default()),
+                    Span::styled("Q", Style::default().fg(Color::Rgb(140, 60, 200)).add_modifier(Modifier::BOLD)),
+                    Span::styled("U", Style::default().fg(Color::Rgb(160, 80, 220)).add_modifier(Modifier::BOLD)),
+                    Span::styled("A", Style::default().fg(Color::Rgb(140, 60, 200)).add_modifier(Modifier::BOLD)),
+                    Span::styled("N", Style::default().fg(Color::Rgb(120, 50, 180)).add_modifier(Modifier::BOLD)),
+                    Span::styled("T", Style::default().fg(Color::Rgb(140, 60, 200)).add_modifier(Modifier::BOLD)),
+                    Span::styled("U", Style::default().fg(Color::Rgb(120, 50, 180)).add_modifier(Modifier::BOLD)),
+                    Span::styled("M", Style::default().fg(Color::Rgb(140, 60, 200)).add_modifier(Modifier::BOLD)),
+                ]),
+                Line::from(""),
+                // Glitch effect bottom - animated (darker colors for white background)
+                Line::from(vec![
+                    Span::styled(glitch_bot, Style::default().fg(Color::Rgb(180, 0, 200))),
+                    Span::styled(glitch_mid, Style::default().fg(Color::Rgb(140, 140, 140))),
+                    Span::styled(glitch_top, Style::default().fg(Color::Rgb(0, 150, 200))),
+                ]),
+                Line::from(""),
+                Line::from(""),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("SPHINCS+ SHA2-128s  •  NIST FIPS 205  •  Quantum-Resistant", Style::default().fg(Color::Rgb(100, 100, 100))),
+                ]),
+            ];
+
+            let splash = Paragraph::new(title_lines)
+                .block(Block::default())
+                .style(Style::default().bg(Color::Rgb(255, 255, 255)))  // White background
+                .alignment(Alignment::Center);
+
+            // Render white background for entire screen
+            let background = Block::default()
+                .style(Style::default().bg(Color::Rgb(255, 255, 255)));
+            f.render_widget(background, size);
+
+            f.render_widget(splash, chunks[1]);
+        })?;
+
+        // Update every 100ms for smooth animation
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    // Clean up
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    terminal.show_cursor()?;
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -732,6 +872,10 @@ async fn main() -> Result<()> {
                 program_id,
                 mint,
             )?;
+
+            // Show splash screen before dashboard
+            show_splash_screen()?;
+
             dashboard.run()?;
         }
 

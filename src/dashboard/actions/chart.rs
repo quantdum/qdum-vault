@@ -9,7 +9,7 @@ impl Dashboard {
 
         self.status_message = Some("🔍 Querying network for locked tokens...".to_string());
 
-        // Get total locked QDUM across all holders
+        // Get total locked qcoin across all holders
         let result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 vault_client.get_network_locked_total(mint, force_refresh).await
@@ -28,7 +28,7 @@ impl Dashboard {
                     }
                 }
 
-                self.status_message = Some(format!("✅ Recorded: {:.2} QDUM locked ({} holders)", total_locked, holder_count));
+                self.status_message = Some(format!("✅ Recorded: {:.2} qcoin locked ({} holders)", total_locked, holder_count));
                 Ok((total_locked, holder_count))
             }
             Err(e) => {

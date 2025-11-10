@@ -5,12 +5,12 @@ use crate::dashboard::utils::suppress_output;
 
 impl Dashboard {
     pub fn execute_transfer(&mut self) {
-        self.mode = AppMode::TransferPopup;
-        self.needs_clear = true;  // Force terminal clear to prevent background artifacts
+        // Stay in Normal mode - render transfer form in content area
+        self.selected_action = 4;  // Set to Transfer action index
         self.transfer_recipient.clear();
         self.transfer_amount.clear();
         self.transfer_focused_field = TransferInputField::TokenType;
-        self.transfer_token_type = TransferTokenType::StandardQDUM;
+        self.transfer_token_type = TransferTokenType::StandardQcoin;
         self.status_message = Some("Select token type and enter transfer details...".to_string());
     }
 
@@ -49,15 +49,15 @@ impl Dashboard {
     pub fn perform_transfer_action(&mut self) {
         // Check which token type is selected
         let (mint, balance, token_name, requires_unlock) = match self.transfer_token_type {
-            TransferTokenType::StandardQDUM => {
+            TransferTokenType::StandardQcoin => {
                 (self.standard_mint, self.standard_balance, "qcoin", false)
             }
-            TransferTokenType::PqQDUM => {
+            TransferTokenType::Pqcoin => {
                 (self.pq_mint, self.pq_balance, "pqcoin", true)
             }
         };
 
-        // If pqQDUM transfer, check vault is unlocked
+        // If pqcoin transfer, check vault is unlocked
         if requires_unlock {
             if let Some(ref status) = self.vault_status {
                 if status.is_locked {
@@ -65,9 +65,9 @@ impl Dashboard {
                     self.action_steps.clear();
                     self.action_steps.push(ActionStep::Error("❌ Vault is locked!".to_string()));
                     self.action_steps.push(ActionStep::InProgress("".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("You must unlock your vault to transfer pqQDUM.".to_string()));
+                    self.action_steps.push(ActionStep::InProgress("You must unlock your vault to transfer pqcoin.".to_string()));
                     self.action_steps.push(ActionStep::InProgress("Press U to unlock your vault first.".to_string()));
-                    self.status_message = Some("❌ Unlock vault to transfer pqQDUM".to_string());
+                    self.status_message = Some("❌ Unlock vault to transfer pqcoin".to_string());
                     return;
                 }
             } else {
@@ -96,7 +96,7 @@ impl Dashboard {
             }
         };
 
-        // Parse amount (in QDUM, convert to base units)
+        // Parse amount (in qcoin/pqcoin, convert to base units)
         let amount_qdum: f64 = match self.transfer_amount.parse() {
             Ok(amt) => amt,
             Err(e) => {
@@ -134,7 +134,7 @@ impl Dashboard {
                 self.action_steps.push(ActionStep::InProgress("".to_string()));
 
                 match self.transfer_token_type {
-                    TransferTokenType::StandardQDUM => {
+                    TransferTokenType::StandardQcoin => {
                         self.action_steps.push(ActionStep::InProgress("  To create your Standard qcoin account:".to_string()));
                         self.action_steps.push(ActionStep::InProgress("".to_string()));
                         self.action_steps.push(ActionStep::InProgress("  • Press [A] to claim AIRDROP (100 qcoin)".to_string()));
@@ -145,7 +145,7 @@ impl Dashboard {
                         self.action_steps.push(ActionStep::InProgress("  • Press [Shift+W] to UNWRAP pqcoin".to_string()));
                         self.action_steps.push(ActionStep::InProgress("    This converts pqcoin → Standard qcoin".to_string()));
                     }
-                    TransferTokenType::PqQDUM => {
+                    TransferTokenType::Pqcoin => {
                         self.action_steps.push(ActionStep::InProgress("  To create your pqcoin account:".to_string()));
                         self.action_steps.push(ActionStep::InProgress("".to_string()));
                         self.action_steps.push(ActionStep::InProgress("  1. Get Standard qcoin first (Press [A] for airdrop)".to_string()));
@@ -195,10 +195,10 @@ impl Dashboard {
             return;
         }
 
-        // Close the popup and show progress
+        // Show progress
         self.mode = AppMode::Normal;
         self.action_steps.clear();
-        self.action_steps.push(ActionStep::InProgress(format!("Preparing {} transfer...", token_name)));
+        self.action_steps.push(ActionStep::InProgress(format!("Transferring {:.6} {}...", amount_qdum, token_name)));
 
         // Load keypair
         let keypair_path = self.keypair_path.to_str().unwrap();
@@ -207,31 +207,15 @@ impl Dashboard {
         let keypair = match solana_sdk::signature::read_keypair_file(&keypair_path_str) {
             Ok(kp) => kp,
             Err(e) => {
-                self.action_steps.push(ActionStep::Error(format!("Failed to load keypair: {}", e)));
-                self.status_message = Some("Transfer failed!".to_string());
+                self.action_steps.clear();
+                self.action_steps.push(ActionStep::Error(format!("❌ Failed to load keypair: {}", e)));
+                self.status_message = Some("❌ Transfer failed!".to_string());
                 return;
             }
         };
 
-        self.action_steps.push(ActionStep::Success("✓ Keypair loaded".to_string()));
-
-        // Store recipient for display (truncate if too long)
-        let recipient_display = if self.transfer_recipient.len() > 20 {
-            format!("{}...{}", &self.transfer_recipient[..8], &self.transfer_recipient[self.transfer_recipient.len()-8..])
-        } else {
-            self.transfer_recipient.clone()
-        };
-
-        self.action_steps.push(ActionStep::InProgress(format!("Sending {} {} to {}", amount_qdum, token_name, recipient_display)));
-        self.action_steps.push(ActionStep::InProgress("Broadcasting transaction to Solana...".to_string()));
-
         // Execute the transfer
         let vault_client = &self.vault_client;
-
-        // Add debug logging
-        self.action_steps.push(ActionStep::InProgress(format!("Token type: {}", token_name)));
-        self.action_steps.push(ActionStep::InProgress(format!("Mint: {}", mint)));
-
         let result = suppress_output(|| {
             tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current().block_on(async {
@@ -246,35 +230,21 @@ impl Dashboard {
             })
         });
 
-        // Clear and show final result in popup
+        // Show result
         self.action_steps.clear();
         self.mode = AppMode::ResultPopup;
 
-        // Debug: Check what we got
-        let result_type = if result.is_ok() { "Success" } else { "Error" };
-        eprintln!("Transfer result: {}", result_type);
-
         match result {
             Ok(_) => {
-                self.action_steps.push(ActionStep::Success("╔══════════════════════════════════════════╗".to_string()));
-                self.action_steps.push(ActionStep::Success("║      ✓ TRANSFER SUCCESSFUL!             ║".to_string()));
-                self.action_steps.push(ActionStep::Success("╚══════════════════════════════════════════╝".to_string()));
-                self.action_steps.push(ActionStep::Success("".to_string()));
-                self.action_steps.push(ActionStep::Success(format!("Amount:     {:.6} {}", amount_qdum, token_name)));
-                self.action_steps.push(ActionStep::Success(format!("Recipient:  {}", recipient_display)));
-                self.action_steps.push(ActionStep::Success("".to_string()));
-                self.action_steps.push(ActionStep::Success("✓ Transaction confirmed on Solana".to_string()));
-                self.action_steps.push(ActionStep::Success("✓ Tokens have been transferred".to_string()));
+                // Store recipient for display (truncate if too long)
+                let recipient_display = if self.transfer_recipient.len() > 20 {
+                    format!("{}...{}", &self.transfer_recipient[..8], &self.transfer_recipient[self.transfer_recipient.len()-8..])
+                } else {
+                    self.transfer_recipient.clone()
+                };
 
-                // Show updated balance
-                if let Some(old_balance) = balance {
-                    let new_balance = old_balance.saturating_sub(amount_base_units);
-                    let new_balance_qdum = new_balance as f64 / 1_000_000.0;
-                    self.action_steps.push(ActionStep::Success("".to_string()));
-                    self.action_steps.push(ActionStep::InProgress(format!("New {} balance: {:.6} {}", token_name, new_balance_qdum, token_name)));
-                }
-
-                self.status_message = Some("✓ Transfer completed successfully!".to_string());
+                self.action_steps.push(ActionStep::Success(format!("✅ Transferred {:.6} {} to {}", amount_qdum, token_name, recipient_display)));
+                self.status_message = Some("✅ Transfer completed successfully!".to_string());
                 self.transfer_recipient.clear();
                 self.transfer_amount.clear();
 
@@ -283,88 +253,9 @@ impl Dashboard {
                 self.refresh_data();
             }
             Err(e) => {
-                let error_str = e.to_string();
-
-                self.action_steps.push(ActionStep::Error("╔══════════════════════════════════════════╗".to_string()));
-                self.action_steps.push(ActionStep::Error("║      ✗ TRANSFER FAILED                   ║".to_string()));
-                self.action_steps.push(ActionStep::Error("╚══════════════════════════════════════════╝".to_string()));
-                self.action_steps.push(ActionStep::Error("".to_string()));
-                self.action_steps.push(ActionStep::Error(format!("Token Type: {}", token_name)));
-                self.action_steps.push(ActionStep::Error(format!("Amount:     {:.6} {}", amount_qdum, token_name)));
-                self.action_steps.push(ActionStep::Error(format!("Recipient:  {}", recipient_display)));
-                self.action_steps.push(ActionStep::Error("".to_string()));
-                self.action_steps.push(ActionStep::Error(format!("Error: {}", error_str)));
-                self.action_steps.push(ActionStep::Error("".to_string()));
-
-                // Provide specific help based on error type
-                if error_str.contains("InvalidAccountData") {
-                    self.action_steps.push(ActionStep::InProgress("💡 Issue: Invalid account data for transfer hook".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("  This is a known issue with pqQDUM transfer hooks.".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("  The transfer hook validation failed.".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("  Possible solutions:".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("  1. Ensure vault is unlocked (Press U)".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("  2. Try unwrapping pqcoin to Standard qcoin first".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("     (Press Shift+W to unwrap)".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("  3. Transfer Standard qcoin instead".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("  Note: Standard qcoin transfers work normally".to_string()));
-                } else if error_str.contains("Vault is locked") {
-                    self.action_steps.push(ActionStep::InProgress("💡 Issue: Vault is currently locked".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("  pqcoin transfers require the vault to be unlocked.".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("  To unlock your vault:".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("  • Press [U] to start the unlock process".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("  • Sign the challenge with your SPHINCS+ key".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("  • Once unlocked, you can transfer pqcoin".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("  Note: Standard qcoin can be transferred without unlocking".to_string()));
-                } else if error_str.contains("Sender token account not found") || error_str.contains("could not find account") {
-                    self.action_steps.push(ActionStep::InProgress("💡 Solution:".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("".to_string()));
-
-                    match self.transfer_token_type {
-                        TransferTokenType::StandardQDUM => {
-                            self.action_steps.push(ActionStep::InProgress("  You don't have a Standard qcoin token account yet.".to_string()));
-                            self.action_steps.push(ActionStep::InProgress("".to_string()));
-                            self.action_steps.push(ActionStep::InProgress("  To get Standard qcoin:".to_string()));
-                            self.action_steps.push(ActionStep::InProgress("  1. Use AIRDROP (Press A) to claim 100 qcoin".to_string()));
-                            self.action_steps.push(ActionStep::InProgress("     OR".to_string()));
-                            self.action_steps.push(ActionStep::InProgress("  2. Use UNWRAP (Press Shift+W) to convert pqcoin".to_string()));
-                            self.action_steps.push(ActionStep::InProgress("     to Standard qcoin".to_string()));
-                        }
-                        TransferTokenType::PqQDUM => {
-                            self.action_steps.push(ActionStep::InProgress("  You don't have any pqcoin tokens yet.".to_string()));
-                            self.action_steps.push(ActionStep::InProgress("".to_string()));
-                            self.action_steps.push(ActionStep::InProgress("  To get pqcoin:".to_string()));
-                            self.action_steps.push(ActionStep::InProgress("  1. Get Standard qcoin (Press A for airdrop)".to_string()));
-                            self.action_steps.push(ActionStep::InProgress("  2. Use WRAP (Press W) to convert Standard qcoin".to_string()));
-                            self.action_steps.push(ActionStep::InProgress("     to pqcoin".to_string()));
-                        }
-                    }
-                } else if error_str.contains("insufficient funds") || error_str.contains("Insufficient") {
-                    self.action_steps.push(ActionStep::InProgress("💡 Issue: Insufficient SOL for transaction fees".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("  You need SOL to pay for transaction fees on Solana.".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("  Get devnet SOL: solana airdrop 1".to_string()));
-                } else {
-                    self.action_steps.push(ActionStep::InProgress("Common issues:".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("  • Insufficient SOL for transaction fee".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("  • Network connectivity issues".to_string()));
-                    self.action_steps.push(ActionStep::InProgress("  • Invalid recipient address".to_string()));
-                }
-
+                self.action_steps.push(ActionStep::Error(format!("❌ Transfer failed: {}", e)));
                 self.status_message = Some("❌ Transfer failed!".to_string());
             }
-        }
-
-        // Debug: Ensure we have action steps
-        if self.action_steps.is_empty() {
-            eprintln!("WARNING: No action steps after transfer!");
-            self.action_steps.push(ActionStep::Error("❌ Transfer failed with unknown error".to_string()));
-            self.action_steps.push(ActionStep::InProgress("Please check the terminal for details".to_string()));
         }
     }
 }

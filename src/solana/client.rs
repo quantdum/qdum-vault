@@ -443,9 +443,13 @@ impl VaultClient {
     pub async fn claim_airdrop(&self, wallet: Pubkey, keypair_path: &str, mint: Pubkey) -> Result<()> {
         let keypair = self.load_keypair(keypair_path)?;
 
-        // Derive PQ account PDA
+        // IMPORTANT: Use keypair.pubkey() as the claimer/owner, not the wallet parameter
+        // The PQ account must be owned by the signer (claimer)
+        let claimer = keypair.pubkey();
+
+        // Derive PQ account PDA using the claimer (signer) pubkey
         let (pq_account, _bump) = Pubkey::find_program_address(
-            &[b"pq_account", wallet.as_ref()],
+            &[b"pq_account", claimer.as_ref()],
             &self.program_id,
         );
 
@@ -455,30 +459,108 @@ impl VaultClient {
             &self.program_id,
         );
 
-        // Derive mint authority PDA
-        let (mint_authority, _) = Pubkey::find_program_address(
-            &[b"mint_authority"],
-            &self.program_id,
+        // Bridge program and PDA (for CPI to mint tokens)
+        let bridge_program_id = solana_sdk::pubkey!("2psMx7yfQL7yAbu6NNRathTkC1rSY4CGDvBd2qWqzirF");
+        let (bridge, _) = Pubkey::find_program_address(
+            &[b"bridge"],
+            &bridge_program_id,
         );
 
-        // Get associated token account
-        let recipient_token_account = get_associated_token_address(&wallet, &mint, &TOKEN_2022_PROGRAM_ID);
-
         println!("Claiming 100 QDUM airdrop...");
+
+        // Debug: Fetch the PQ account and check its owner field
+        let mut pq_account_owner_info = String::from("PQ Account not found on-chain!");
+        if let Ok(account_info) = self.rpc_client.get_account(&pq_account) {
+            if account_info.data.len() >= 41 {
+                // Parse owner pubkey (8 bytes discriminator + 32 bytes owner)
+                let owner_bytes: [u8; 32] = account_info.data[8..40].try_into().unwrap();
+                let owner_pubkey = Pubkey::new_from_array(owner_bytes);
+
+                // Parse algorithm (byte 40)
+                let algorithm = account_info.data[40];
+
+                // Parse public_key length (bytes 41-45 for Vec length prefix)
+                let pubkey_len = if account_info.data.len() >= 45 {
+                    u32::from_le_bytes([
+                        account_info.data[41],
+                        account_info.data[42],
+                        account_info.data[43],
+                        account_info.data[44],
+                    ])
+                } else {
+                    0
+                };
+
+                pq_account_owner_info = format!(
+                    "PQ Account exists!\n\
+                    On-chain owner field: {}\n\
+                    Matches claimer? {}\n\
+                    Matches wallet param? {}\n\
+                    Algorithm: {} (expected: 2 for SPHINCS+)\n\
+                    Public key length: {} (must be > 0)",
+                    owner_pubkey,
+                    owner_pubkey == claimer,
+                    owner_pubkey == wallet,
+                    algorithm,
+                    pubkey_len
+                );
+            }
+        }
+
+        // CRITICAL: Fetch the mint from mint_state on-chain
+        // The mint passed as parameter might not match what's in the on-chain state
+        // MintState layout: 8 bytes discriminator + 32 bytes authority + 32 bytes mint
+        let actual_mint = if let Ok(account_info) = self.rpc_client.get_account(&mint_state) {
+            eprintln!("DEBUG: mint_state account data length: {}", account_info.data.len());
+
+            if account_info.data.len() >= 72 {
+                // Parse authority (bytes 8-40)
+                let authority_bytes: [u8; 32] = account_info.data[8..40].try_into().unwrap();
+                let authority = Pubkey::new_from_array(authority_bytes);
+
+                // Parse mint pubkey (bytes 40-72) - THIS IS THE CORRECT LOCATION!
+                let mint_bytes: [u8; 32] = account_info.data[40..72].try_into().unwrap();
+                let parsed_mint = Pubkey::new_from_array(mint_bytes);
+
+                eprintln!("DEBUG: Authority from state: {}", authority);
+                eprintln!("DEBUG: Mint from state: {}", parsed_mint);
+                parsed_mint
+            } else {
+                eprintln!("DEBUG: Account data too short ({}), using parameter mint", account_info.data.len());
+                mint // Fall back to parameter if can't parse
+            }
+        } else {
+            eprintln!("DEBUG: Failed to fetch mint_state account, using parameter mint");
+            mint // Fall back to parameter if can't fetch
+        };
+
+        // Debug info
+        let mint_state_info = format!(
+            "Mint State Check:\n\
+            Mint from state (using): {}\n\
+            Mint from param: {}\n\
+            Match: {}",
+            actual_mint,
+            mint,
+            actual_mint == mint
+        );
+
+        // Use the actual_mint to get the correct recipient token account
+        let recipient_token_account = get_associated_token_address(&claimer, &actual_mint, &TOKEN_2022_PROGRAM_ID);
 
         // Check if associated token account exists, create if needed
         let mut instructions = Vec::new();
         let account_info = self.rpc_client.get_account(&recipient_token_account);
         if account_info.is_err() {
-            println!("Creating associated token account...");
+            println!("Creating associated token account for mint {}...", actual_mint);
             // Create ATA instruction
             let create_ata_ix = Instruction {
                 program_id: solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"),
                 accounts: vec![
-                    solana_sdk::instruction::AccountMeta::new(keypair.pubkey(), true),  // payer
+                    solana_sdk::instruction::AccountMeta::new(claimer, true),  // payer
                     solana_sdk::instruction::AccountMeta::new(recipient_token_account, false), // ata
-                    solana_sdk::instruction::AccountMeta::new_readonly(wallet, false),  // owner
-                    solana_sdk::instruction::AccountMeta::new_readonly(mint, false),    // mint
+                    solana_sdk::instruction::AccountMeta::new_readonly(claimer, false),  // owner
+                    solana_sdk::instruction::AccountMeta::new_readonly(actual_mint, false),    // mint (from state!)
                     solana_sdk::instruction::AccountMeta::new_readonly(solana_sdk::system_program::ID, false), // system_program
                     solana_sdk::instruction::AccountMeta::new_readonly(TOKEN_2022_PROGRAM_ID, false), // token_program
                 ],
@@ -486,6 +568,42 @@ impl VaultClient {
             };
             instructions.push(create_ata_ix);
         }
+
+        // Debug: Log all account details
+        let debug_info = format!(
+            "=== AIRDROP CLAIM DEBUG ===\n\
+            Wallet parameter: {}\n\
+            Keypair pubkey (claimer): {}\n\
+            Are they equal? {}\n\
+            \n\
+            {}\n\
+            \n\
+            {}\n\
+            \n\
+            PQ Account PDA: {}\n\
+            Mint State PDA: {}\n\
+            Bridge PDA: {}\n\
+            Actual Mint (from state): {}\n\
+            Recipient Token Account: {}\n\
+            Token Program: {}\n\
+            Program ID: {}\n\
+            Bridge Program ID: {}\n",
+            wallet,
+            claimer,
+            wallet == claimer,
+            pq_account_owner_info,
+            mint_state_info,
+            pq_account,
+            mint_state,
+            bridge,
+            actual_mint,
+            recipient_token_account,
+            TOKEN_2022_PROGRAM_ID,
+            self.program_id,
+            bridge_program_id
+        );
+        let _ = std::fs::write("/tmp/airdrop-accounts-debug.log", &debug_info);
+        eprintln!("{}", debug_info);
 
         let claim_instruction_data = CLAIM_AIRDROP_DISCRIMINATOR.to_vec();
 
@@ -495,10 +613,11 @@ impl VaultClient {
                 solana_sdk::instruction::AccountMeta::new(keypair.pubkey(), true),  // claimer (signer)
                 solana_sdk::instruction::AccountMeta::new(pq_account, false),        // pq_account
                 solana_sdk::instruction::AccountMeta::new(mint_state, false),        // mint_state
-                solana_sdk::instruction::AccountMeta::new_readonly(mint_authority, false), // mint_authority
-                solana_sdk::instruction::AccountMeta::new(mint, false), // mint
+                solana_sdk::instruction::AccountMeta::new(actual_mint, false), // mint (from state!)
                 solana_sdk::instruction::AccountMeta::new(recipient_token_account, false), // recipient_token_account
                 solana_sdk::instruction::AccountMeta::new_readonly(TOKEN_2022_PROGRAM_ID, false), // token_program
+                solana_sdk::instruction::AccountMeta::new_readonly(bridge_program_id, false), // bridge_program
+                solana_sdk::instruction::AccountMeta::new(bridge, false), // bridge PDA
             ],
             data: claim_instruction_data,
         };
@@ -512,7 +631,34 @@ impl VaultClient {
             recent_blockhash,
         );
 
-        let signature = self.rpc_client.send_and_confirm_transaction(&transaction)?;
+        let signature = match self.rpc_client.send_and_confirm_transaction(&transaction) {
+            Ok(sig) => sig,
+            Err(e) => {
+                // Log the full error details
+                let error_details = format!(
+                    "=== AIRDROP TRANSACTION ERROR ===\n\
+                    Error: {:?}\n\
+                    Error Display: {}\n\
+                    \n\
+                    Transaction details:\n\
+                    Claimer: {}\n\
+                    PQ Account: {}\n\
+                    Mint State: {}\n\
+                    Mint: {}\n\
+                    Recipient Token Account: {}\n",
+                    e,
+                    e,
+                    claimer,
+                    pq_account,
+                    mint_state,
+                    actual_mint,
+                    recipient_token_account
+                );
+                let _ = std::fs::write("/tmp/airdrop-transaction-error.log", &error_details);
+                eprintln!("{}", error_details);
+                return Err(e.into());
+            }
+        };
 
         println!();
         println!("{}", "✅ Airdrop Claimed Successfully!".green().bold());

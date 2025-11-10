@@ -33,18 +33,18 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 
 impl Dashboard {
     pub fn render_action_popup(&self, f: &mut Frame, area: Rect, title: &str, title_color: Color) {
-        let popup_area = centered_rect(70, 70, area);
+        let popup_area = centered_rect(85, 75, area);  // Wider popup for long messages
 
         // Clear background
         f.render_widget(Clear, popup_area);
 
-        // Build table rows from action steps
-        let mut rows = vec![];
+        // Build content lines instead of table rows for better text wrapping
+        let mut content_lines = vec![Line::from("")];
 
         if self.action_steps.is_empty() {
-            rows.push(Row::new(vec![
-                Line::from(Span::styled("STATUS", Style::default().fg(Theme::CYAN_BRIGHT).add_modifier(Modifier::BOLD))),
-                Line::from(Span::styled("Initializing...", Style::default().fg(Theme::SUBTEXT0).add_modifier(Modifier::ITALIC))),
+            content_lines.push(Line::from(vec![
+                Span::styled("STATUS: ", Style::default().fg(Theme::BLOOMBERG_ORANGE).add_modifier(Modifier::BOLD)),
+                Span::styled("Initializing...", Style::default().fg(Theme::SUBTEXT0).add_modifier(Modifier::ITALIC)),
             ]));
         } else {
             for (idx, step) in self.action_steps.iter().enumerate() {
@@ -55,117 +55,138 @@ impl Dashboard {
                     ActionStep::Error(msg) => ("✗", msg.as_str(), Theme::RED_NEON),
                 };
 
-                let step_label = format!("STEP {}", idx + 1);
-                rows.push(Row::new(vec![
-                    Line::from(Span::styled(step_label, Style::default().fg(Theme::CYAN_BRIGHT).add_modifier(Modifier::BOLD))),
-                    Line::from(vec![
+                let step_label = format!("STEP {}:", idx + 1);
+
+                // For long messages, wrap them
+                let max_width = (popup_area.width as usize).saturating_sub(20);
+                if message.len() > max_width {
+                    // First line with step label and icon
+                    content_lines.push(Line::from(vec![
+                        Span::styled(step_label, Style::default().fg(Theme::BLOOMBERG_ORANGE).add_modifier(Modifier::BOLD)),
+                    ]));
+
+                    // Message on next line with icon, allowing wrapping
+                    content_lines.push(Line::from(vec![
+                        Span::styled(format!("  {} ", icon), Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                        Span::styled(message, Style::default().fg(color)),
+                    ]));
+                } else {
+                    // Single line for short messages
+                    content_lines.push(Line::from(vec![
+                        Span::styled(format!("{} ", step_label), Style::default().fg(Theme::BLOOMBERG_ORANGE).add_modifier(Modifier::BOLD)),
                         Span::styled(format!("{} ", icon), Style::default().fg(color).add_modifier(Modifier::BOLD)),
                         Span::styled(message, Style::default().fg(color)),
-                    ]),
-                ]));
+                    ]));
+                }
 
                 // Add separator between steps
                 if idx < self.action_steps.len() - 1 {
-                    rows.push(Row::new(vec![
-                        Line::from(Span::styled("━━━━━━━━", Style::default().fg(Theme::DIM))),
-                        Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))),
-                    ]));
+                    content_lines.push(Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))));
                 }
+                content_lines.push(Line::from(""));
             }
         }
 
-        // Add controls row
-        rows.push(Row::new(vec![
-            Line::from(Span::styled("━━━━━━━━", Style::default().fg(Theme::DIM))),
-            Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))),
+        // Add spacing and controls
+        content_lines.push(Line::from(""));
+        content_lines.push(Line::from(Span::styled("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", Style::default().fg(Theme::DIM))));
+        content_lines.push(Line::from(""));
+        content_lines.push(Line::from(vec![
+            Span::styled(" [ESC] ", Style::default().fg(Theme::BASE).bg(Theme::RED_NEON).add_modifier(Modifier::BOLD)),
+            Span::styled(" Close", Style::default().fg(Theme::TEXT)),
         ]));
 
-        rows.push(Row::new(vec![
-            Line::from(Span::styled("CONTROLS", Style::default().fg(Theme::CYAN_BRIGHT).add_modifier(Modifier::BOLD))),
-            Line::from(vec![
-                Span::styled(" [Esc] ", Style::default().fg(Theme::TEXT).bg(title_color).add_modifier(Modifier::BOLD)),
-                Span::styled(" Close", Style::default().fg(Theme::TEXT)),
-            ]),
-        ]));
+        // Static gray border matching main dashboard
+        let border_color = Color::Rgb(140, 140, 140);
 
-        let widths = [Constraint::Length(12), Constraint::Min(40)];
-
-        // Pulse effect for border
-        let pulse = self.get_pulse_intensity();
-        let border_color = match title {
-            "REGISTER VAULT" | "REGISTER" => Color::Rgb(0, (100 + pulse / 2) as u8, (200 + pulse / 4) as u8),
-            "LOCK VAULT" => Color::Rgb((200 + pulse / 4) as u8, (50 + pulse / 5) as u8, 50),
-            _ => Color::Rgb((150 + pulse / 3) as u8, (100 + pulse / 4) as u8, (200 + pulse / 4) as u8),
-        };
-
-        let table = Table::new(rows, widths)
+        let paragraph = Paragraph::new(content_lines)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
-                    .border_type(BorderType::Rounded)
-                    .title(format!(" {} ", title))
-                    .title_style(Style::default().fg(title_color).add_modifier(Modifier::BOLD)),
+                    .border_type(BorderType::Double)
+                    .title(format!(" ┃ {} ┃ ", title))
+                    .title_style(Style::default().fg(Theme::BLOOMBERG_ORANGE).add_modifier(Modifier::BOLD)),
             )
-            .style(Style::default().bg(Theme::GLASS_1))
-            .column_spacing(2);
+            .style(Style::default().bg(Theme::BASE))
+            .wrap(ratatui::widgets::Wrap { trim: false });
 
-        f.render_widget(table, popup_area);
+        f.render_widget(paragraph, popup_area);
     }
     pub fn render_unlock_popup(&self, f: &mut Frame, area: Rect) {
-        let popup_area = centered_rect(60, 40, area);
+        let popup_area = centered_rect(60, 50, area);
         f.render_widget(Clear, popup_area);
 
-        let pulse = self.get_pulse_intensity();
-        let glow = (pulse as f32 * 0.6) as u8;
+        // Glitch characters for animation (same as splash screen)
+        let glitch_chars = vec!["█", "▓", "▒", "░", "▀", "▄", "▌", "▐", "■", "□"];
 
-        // Split popup into sections
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(3),   // Title
-                Constraint::Min(8),      // Animation/message
-            ].as_ref())
-            .split(popup_area);
+        // Generate animated glitch pattern using animation frame
+        let seed = self.animation_frame as usize;
 
-        // Title
-        let title = Paragraph::new(vec![
-            Line::from(vec![
-                Span::styled("  🔓  ", Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD)),
-                Span::styled("UNLOCKING VAULT", Style::default().fg(Theme::CYAN_BRIGHT).add_modifier(Modifier::BOLD)),
-                Span::styled("  🔓  ", Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD)),
-            ]),
-        ])
-        .block(Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Rgb(80 + glow, 200 + glow, 255)))
-            .border_type(BorderType::Rounded))
-        .style(Style::default().bg(Theme::GLASS_1))
-        .alignment(Alignment::Center);
-        f.render_widget(title, chunks[0]);
+        let glitch_top = format!("{}{}{}{}",
+            glitch_chars[seed % glitch_chars.len()],
+            glitch_chars[(seed + 1) % glitch_chars.len()],
+            glitch_chars[(seed + 2) % glitch_chars.len()],
+            glitch_chars[(seed + 3) % glitch_chars.len()],
+        );
 
-        // Simple animated spinner
-        let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-        let spinner_idx = ((self.animation_frame / 2) as usize) % spinner_chars.len();
-        let spinner = spinner_chars[spinner_idx];
+        let glitch_mid = format!(" {}{}{}{}{} ",
+            glitch_chars[(seed + 4) % glitch_chars.len()],
+            glitch_chars[(seed + 5) % glitch_chars.len()],
+            glitch_chars[(seed + 6) % glitch_chars.len()],
+            glitch_chars[(seed + 7) % glitch_chars.len()],
+            glitch_chars[(seed + 8) % glitch_chars.len()],
+        );
 
-        // Content area
+        let glitch_bot = format!("{}{}{}",
+            glitch_chars[(seed + 9) % glitch_chars.len()],
+            glitch_chars[(seed + 10) % glitch_chars.len()],
+            glitch_chars[(seed + 11) % glitch_chars.len()],
+        );
+
+        // Content with glitch animation
         let content_lines = vec![
             Line::from(""),
             Line::from(""),
+            // Glitch effect top
             Line::from(vec![
-                Span::styled(spinner, Style::default().fg(Theme::CYAN_BRIGHT).add_modifier(Modifier::BOLD)),
-                Span::styled("  Verifying SPHINCS+ signature...", Style::default().fg(Theme::TEXT)),
+                Span::styled(glitch_top.clone(), Style::default().fg(Color::Rgb(0, 150, 200))),
+                Span::styled(glitch_mid.clone(), Style::default().fg(Color::Rgb(140, 140, 140))),
+                Span::styled(glitch_bot.clone(), Style::default().fg(Color::Rgb(180, 0, 200))),
             ]),
             Line::from(""),
-            Line::from(Span::styled(
-                "Please wait while quantum-resistant verification completes.",
-                Style::default().fg(Theme::SUBTEXT1),
-            )),
+            // Main message
+            Line::from(vec![
+                Span::styled("U", Style::default().fg(Color::Rgb(120, 60, 200)).add_modifier(Modifier::BOLD)),
+                Span::styled("N", Style::default().fg(Color::Rgb(140, 80, 220)).add_modifier(Modifier::BOLD)),
+                Span::styled("L", Style::default().fg(Color::Rgb(120, 60, 200)).add_modifier(Modifier::BOLD)),
+                Span::styled("O", Style::default().fg(Color::Rgb(100, 50, 180)).add_modifier(Modifier::BOLD)),
+                Span::styled("C", Style::default().fg(Color::Rgb(140, 60, 200)).add_modifier(Modifier::BOLD)),
+                Span::styled("K", Style::default().fg(Color::Rgb(160, 80, 220)).add_modifier(Modifier::BOLD)),
+                Span::styled("I", Style::default().fg(Color::Rgb(140, 60, 200)).add_modifier(Modifier::BOLD)),
+                Span::styled("N", Style::default().fg(Color::Rgb(120, 50, 180)).add_modifier(Modifier::BOLD)),
+                Span::styled("G", Style::default().fg(Color::Rgb(140, 60, 200)).add_modifier(Modifier::BOLD)),
+                Span::styled(".", Style::default().fg(Color::Rgb(120, 50, 180)).add_modifier(Modifier::BOLD)),
+                Span::styled(".", Style::default().fg(Color::Rgb(140, 60, 200)).add_modifier(Modifier::BOLD)),
+                Span::styled(".", Style::default().fg(Color::Rgb(160, 80, 220)).add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(""),
+            // Glitch effect bottom
+            Line::from(vec![
+                Span::styled(glitch_bot, Style::default().fg(Color::Rgb(180, 0, 200))),
+                Span::styled(glitch_mid, Style::default().fg(Color::Rgb(140, 140, 140))),
+                Span::styled(glitch_top, Style::default().fg(Color::Rgb(0, 150, 200))),
+            ]),
+            Line::from(""),
             Line::from(""),
             Line::from(vec![
-                Span::styled("[Esc] ", Style::default().fg(Theme::RED_NEON).add_modifier(Modifier::BOLD)),
-                Span::styled("Cancel", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("SPHINCS+ SHA2-128s  •  NIST FIPS 205  •  Quantum-Resistant", Style::default().fg(Color::Rgb(100, 100, 100))),
+            ]),
+            Line::from(""),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled(" [ESC] ", Style::default().fg(Theme::BASE).bg(Theme::RED_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled(" Cancel", Style::default().fg(Theme::TEXT)),
             ]),
         ];
 
@@ -173,68 +194,86 @@ impl Dashboard {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Rgb(80 + glow, 200 + glow, 255)))
-                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(Color::Rgb(140, 140, 140)).add_modifier(Modifier::BOLD))
+                    .border_type(BorderType::Double)
             )
-            .style(Style::default().bg(Theme::GLASS_2))
+            .style(Style::default().bg(Theme::BASE))
             .alignment(Alignment::Center);
 
-        f.render_widget(content, chunks[1]);
+        f.render_widget(content, popup_area);
     }
     pub fn render_lock_popup(&self, f: &mut Frame, area: Rect) {
-        let popup_area = centered_rect(60, 40, area);
+        let popup_area = centered_rect(60, 50, area);
         f.render_widget(Clear, popup_area);
 
-        let pulse = self.get_pulse_intensity();
-        let glow = (pulse as f32 * 0.6) as u8;
+        // Glitch characters for animation (same as splash screen)
+        let glitch_chars = vec!["█", "▓", "▒", "░", "▀", "▄", "▌", "▐", "■", "□"];
 
-        // Split popup into sections
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(3),   // Title
-                Constraint::Min(8),      // Animation/message
-            ].as_ref())
-            .split(popup_area);
+        // Generate animated glitch pattern using animation frame
+        let seed = self.animation_frame as usize;
 
-        // Title
-        let title = Paragraph::new(vec![
-            Line::from(vec![
-                Span::styled("  🔒  ", Style::default().fg(Theme::RED_NEON).add_modifier(Modifier::BOLD)),
-                Span::styled("LOCKING VAULT", Style::default().fg(Theme::RED_NEON).add_modifier(Modifier::BOLD)),
-                Span::styled("  🔒  ", Style::default().fg(Theme::RED_NEON).add_modifier(Modifier::BOLD)),
-            ]),
-        ])
-        .block(Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Rgb(200 + glow / 4, 50 + glow / 5, 50)))
-            .border_type(BorderType::Rounded))
-        .style(Style::default().bg(Theme::GLASS_1))
-        .alignment(Alignment::Center);
-        f.render_widget(title, chunks[0]);
+        let glitch_top = format!("{}{}{}{}",
+            glitch_chars[seed % glitch_chars.len()],
+            glitch_chars[(seed + 1) % glitch_chars.len()],
+            glitch_chars[(seed + 2) % glitch_chars.len()],
+            glitch_chars[(seed + 3) % glitch_chars.len()],
+        );
 
-        // Simple animated spinner
-        let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-        let spinner_idx = ((self.animation_frame / 2) as usize) % spinner_chars.len();
-        let spinner = spinner_chars[spinner_idx];
+        let glitch_mid = format!(" {}{}{}{}{} ",
+            glitch_chars[(seed + 4) % glitch_chars.len()],
+            glitch_chars[(seed + 5) % glitch_chars.len()],
+            glitch_chars[(seed + 6) % glitch_chars.len()],
+            glitch_chars[(seed + 7) % glitch_chars.len()],
+            glitch_chars[(seed + 8) % glitch_chars.len()],
+        );
 
-        // Content area
+        let glitch_bot = format!("{}{}{}",
+            glitch_chars[(seed + 9) % glitch_chars.len()],
+            glitch_chars[(seed + 10) % glitch_chars.len()],
+            glitch_chars[(seed + 11) % glitch_chars.len()],
+        );
+
+        // Content with glitch animation
         let content_lines = vec![
             Line::from(""),
             Line::from(""),
+            // Glitch effect top
             Line::from(vec![
-                Span::styled(spinner, Style::default().fg(Theme::RED_NEON).add_modifier(Modifier::BOLD)),
-                Span::styled("  Locking vault...", Style::default().fg(Theme::TEXT)),
+                Span::styled(glitch_top.clone(), Style::default().fg(Color::Rgb(0, 150, 200))),
+                Span::styled(glitch_mid.clone(), Style::default().fg(Color::Rgb(140, 140, 140))),
+                Span::styled(glitch_bot.clone(), Style::default().fg(Color::Rgb(180, 0, 200))),
             ]),
             Line::from(""),
-            Line::from(Span::styled(
-                "Please wait while your tokens are secured.",
-                Style::default().fg(Theme::SUBTEXT1),
-            )),
+            // Main message
+            Line::from(vec![
+                Span::styled("L", Style::default().fg(Color::Rgb(120, 60, 200)).add_modifier(Modifier::BOLD)),
+                Span::styled("O", Style::default().fg(Color::Rgb(140, 80, 220)).add_modifier(Modifier::BOLD)),
+                Span::styled("C", Style::default().fg(Color::Rgb(120, 60, 200)).add_modifier(Modifier::BOLD)),
+                Span::styled("K", Style::default().fg(Color::Rgb(100, 50, 180)).add_modifier(Modifier::BOLD)),
+                Span::styled("I", Style::default().fg(Color::Rgb(140, 60, 200)).add_modifier(Modifier::BOLD)),
+                Span::styled("N", Style::default().fg(Color::Rgb(160, 80, 220)).add_modifier(Modifier::BOLD)),
+                Span::styled("G", Style::default().fg(Color::Rgb(140, 60, 200)).add_modifier(Modifier::BOLD)),
+                Span::styled(".", Style::default().fg(Color::Rgb(120, 50, 180)).add_modifier(Modifier::BOLD)),
+                Span::styled(".", Style::default().fg(Color::Rgb(140, 60, 200)).add_modifier(Modifier::BOLD)),
+                Span::styled(".", Style::default().fg(Color::Rgb(160, 80, 220)).add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(""),
+            // Glitch effect bottom
+            Line::from(vec![
+                Span::styled(glitch_bot, Style::default().fg(Color::Rgb(180, 0, 200))),
+                Span::styled(glitch_mid, Style::default().fg(Color::Rgb(140, 140, 140))),
+                Span::styled(glitch_top, Style::default().fg(Color::Rgb(0, 150, 200))),
+            ]),
+            Line::from(""),
             Line::from(""),
             Line::from(vec![
-                Span::styled("[Esc] ", Style::default().fg(Theme::RED_NEON).add_modifier(Modifier::BOLD)),
-                Span::styled("Cancel", Style::default().fg(Theme::SUBTEXT1)),
+                Span::styled("SPHINCS+ SHA2-128s  •  NIST FIPS 205  •  Quantum-Resistant", Style::default().fg(Color::Rgb(100, 100, 100))),
+            ]),
+            Line::from(""),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled(" [ESC] ", Style::default().fg(Theme::BASE).bg(Theme::RED_NEON).add_modifier(Modifier::BOLD)),
+                Span::styled(" Cancel", Style::default().fg(Theme::TEXT)),
             ]),
         ];
 
@@ -242,13 +281,13 @@ impl Dashboard {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Rgb(200 + glow / 4, 50 + glow / 5, 50)))
-                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(Color::Rgb(140, 140, 140)).add_modifier(Modifier::BOLD))
+                    .border_type(BorderType::Double)
             )
-            .style(Style::default().bg(Theme::GLASS_2))
+            .style(Style::default().bg(Theme::BASE))
             .alignment(Alignment::Center);
 
-        f.render_widget(content, chunks[1]);
+        f.render_widget(content, popup_area);
     }
     pub fn render_transfer_popup(&self, f: &mut Frame, area: Rect) {
         let popup_area = centered_rect(70, 70, area);
@@ -292,8 +331,8 @@ impl Dashboard {
         };
 
         let (token_type_display, token_note) = match self.transfer_token_type {
-            TransferTokenType::StandardQDUM => ("Standard qcoin", "Can transfer without unlocking"),
-            TransferTokenType::PqQDUM => ("pqcoin", "Requires vault unlock"),
+            TransferTokenType::StandardQcoin => ("Standard qcoin", "Can transfer without unlocking"),
+            TransferTokenType::Pqcoin => ("pqcoin", "Requires vault unlock"),
         };
 
         let token_type_indicator = if self.transfer_focused_field == TransferInputField::TokenType {
@@ -374,8 +413,8 @@ impl Dashboard {
         };
 
         let token_symbol = match self.transfer_token_type {
-            TransferTokenType::StandardQDUM => "qcoin",
-            TransferTokenType::PqQDUM => "pqcoin",
+            TransferTokenType::StandardQcoin => "qcoin",
+            TransferTokenType::Pqcoin => "pqcoin",
         };
 
         let amount_display = if self.transfer_amount.is_empty() {
@@ -433,20 +472,19 @@ impl Dashboard {
 
         let widths = [Constraint::Length(14), Constraint::Min(38)];
 
-        // Pulse effect for border
-        let pulse = self.get_pulse_intensity();
-        let border_color = Color::Rgb(0, (150 + pulse / 3) as u8, (100 + pulse / 4) as u8);
+        // Static gray border matching main dashboard
+        let border_color = Color::Rgb(140, 140, 140);
 
         let table = Table::new(rows, widths)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
-                    .border_type(BorderType::Rounded)
-                    .title(" 💸 TRANSFER TOKENS 💸 ")
-                    .title_style(Style::default().fg(Theme::CYAN_BRIGHT).add_modifier(Modifier::BOLD)),
+                    .border_type(BorderType::Double)
+                    .title(" ┃ TRANSFER TOKENS ┃ ")
+                    .title_style(Style::default().fg(Theme::BLOOMBERG_ORANGE).add_modifier(Modifier::BOLD)),
             )
-            .style(Style::default().bg(Theme::GLASS_1))
+            .style(Style::default().bg(Theme::BASE))
             .column_spacing(2);
 
         f.render_widget(table, popup_area);
@@ -526,20 +564,19 @@ impl Dashboard {
 
         let widths = [Constraint::Length(14), Constraint::Min(38)];
 
-        // Pulse effect for border
-        let pulse = self.get_pulse_intensity();
-        let border_color = Color::Rgb(0, (150 + pulse / 3) as u8, (100 + pulse / 4) as u8);
+        // Static gray border matching main dashboard
+        let border_color = Color::Rgb(140, 140, 140);
 
         let table = Table::new(rows, widths)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
-                    .border_type(BorderType::Rounded)
-                    .title(" 🔄 WRAP TO pqcoin 🔄 ")
-                    .title_style(Style::default().fg(Theme::CYAN_BRIGHT).add_modifier(Modifier::BOLD)),
+                    .border_type(BorderType::Double)
+                    .title(" ┃ WRAP TO PQCOIN ┃ ")
+                    .title_style(Style::default().fg(Theme::BLOOMBERG_ORANGE).add_modifier(Modifier::BOLD)),
             )
-            .style(Style::default().bg(Theme::GLASS_1))
+            .style(Style::default().bg(Theme::BASE))
             .column_spacing(2);
 
         f.render_widget(table, popup_area);
@@ -619,20 +656,19 @@ impl Dashboard {
 
         let widths = [Constraint::Length(14), Constraint::Min(38)];
 
-        // Pulse effect for border
-        let pulse = self.get_pulse_intensity();
-        let border_color = Color::Rgb(0, (150 + pulse / 3) as u8, (100 + pulse / 4) as u8);
+        // Static gray border matching main dashboard
+        let border_color = Color::Rgb(140, 140, 140);
 
         let table = Table::new(rows, widths)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
-                    .border_type(BorderType::Rounded)
-                    .title(" 🔃 UNWRAP TO STANDARD qcoin 🔃 ")
-                    .title_style(Style::default().fg(Theme::CYAN_BRIGHT).add_modifier(Modifier::BOLD)),
+                    .border_type(BorderType::Double)
+                    .title(" ┃ UNWRAP TO STANDARD QCOIN ┃ ")
+                    .title_style(Style::default().fg(Theme::BLOOMBERG_ORANGE).add_modifier(Modifier::BOLD)),
             )
-            .style(Style::default().bg(Theme::GLASS_1))
+            .style(Style::default().bg(Theme::BASE))
             .column_spacing(2);
 
         f.render_widget(table, popup_area);
@@ -771,16 +807,19 @@ impl Dashboard {
 
         let widths = [Constraint::Percentage(100)];
 
+        // Static gray border matching main dashboard
+        let border_color = Color::Rgb(140, 140, 140);
+
         let table = Table::new(rows, widths)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Theme::PURPLE).add_modifier(Modifier::BOLD))
-                    .border_type(BorderType::Rounded)
-                    .title(" 🗄️  VAULT MANAGEMENT 🗄️  ")
-                    .title_style(Style::default().fg(Theme::CYAN_BRIGHT).add_modifier(Modifier::BOLD)),
+                    .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
+                    .border_type(BorderType::Double)
+                    .title(" ┃ VAULT MANAGEMENT ┃ ")
+                    .title_style(Style::default().fg(Theme::BLOOMBERG_ORANGE).add_modifier(Modifier::BOLD)),
             )
-            .style(Style::default().bg(Theme::GLASS_1))
+            .style(Style::default().bg(Theme::BASE))
             .column_spacing(1);
 
         f.render_widget(table, popup_area);
@@ -848,16 +887,19 @@ impl Dashboard {
 
         let widths = [Constraint::Percentage(100)];
 
+        // Static gray border matching main dashboard
+        let border_color = Color::Rgb(140, 140, 140);
+
         let table = Table::new(rows, widths)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Theme::PURPLE).add_modifier(Modifier::BOLD))
-                    .border_type(BorderType::Rounded)
-                    .title(" 🗄️  CREATE NEW VAULT 🗄️  ")
-                    .title_style(Style::default().fg(Theme::CYAN_BRIGHT).add_modifier(Modifier::BOLD)),
+                    .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
+                    .border_type(BorderType::Double)
+                    .title(" ┃ CREATE NEW VAULT ┃ ")
+                    .title_style(Style::default().fg(Theme::BLOOMBERG_ORANGE).add_modifier(Modifier::BOLD)),
             )
-            .style(Style::default().bg(Theme::GLASS_1))
+            .style(Style::default().bg(Theme::BASE))
             .column_spacing(2);
 
         f.render_widget(table, popup_area);
@@ -872,8 +914,9 @@ impl Dashboard {
         let has_error = self.action_steps.iter().any(|step| matches!(step, ActionStep::Error(_)));
         let success = !has_error;
 
-        let border_color = if success { Theme::GREEN_NEON } else { Theme::RED_NEON };
-        let title = if success { " ✓ SUCCESS " } else { " ✗ ERROR " };
+        // Static gray border matching main dashboard
+        let border_color = Color::Rgb(140, 140, 140);
+        let title = if success { " ┃ SUCCESS ┃ " } else { " ┃ ERROR ┃ " };
 
         // Build content lines with improved formatting
         let mut content_lines = vec![Line::from("")];
@@ -970,20 +1013,22 @@ impl Dashboard {
 
         // Add instruction
         content_lines.push(Line::from(vec![
-            Span::styled(" [Esc] ", Style::default().fg(Theme::TEXT).bg(border_color).add_modifier(Modifier::BOLD)),
-            Span::styled(" Close this window", Style::default().fg(Theme::SUBTEXT1)),
+            Span::styled(" [ESC] ", Style::default().fg(Theme::BASE).bg(Theme::RED_NEON).add_modifier(Modifier::BOLD)),
+            Span::styled(" Close this window", Style::default().fg(Theme::TEXT)),
         ]));
+
+        let title_color = if success { Theme::GREEN_NEON } else { Theme::RED_NEON };
 
         let content = Paragraph::new(content_lines)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
-                    .border_type(BorderType::Rounded)
+                    .border_type(BorderType::Double)
                     .title(title)
-                    .title_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
+                    .title_style(Style::default().fg(title_color).add_modifier(Modifier::BOLD))
             )
-            .style(Style::default().bg(Theme::GLASS_1))
+            .style(Style::default().bg(Theme::BASE))
             .alignment(Alignment::Left);
 
         f.render_widget(content, popup_area);
@@ -1091,6 +1136,9 @@ impl Dashboard {
             ]),
         ]));
 
+        // Static gray border matching main dashboard
+        let border_color = Color::Rgb(140, 140, 140);
+
         // Create table
         let table = Table::new(
             rows,
@@ -1100,9 +1148,9 @@ impl Dashboard {
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Double)
-                .border_style(Style::default().fg(Theme::YELLOW_NEON))
-                .title(" CLOSE PQ ACCOUNT ")
-                .title_style(Style::default().fg(Theme::YELLOW_NEON).add_modifier(Modifier::BOLD))
+                .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
+                .title(" ┃ CLOSE PQ ACCOUNT ┃ ")
+                .title_style(Style::default().fg(Theme::BLOOMBERG_ORANGE).add_modifier(Modifier::BOLD))
                 .style(Style::default().bg(Theme::BASE)),
         );
 
@@ -1115,8 +1163,13 @@ impl Dashboard {
 
         let popup_area = centered_rect(98, 95, area);  // Full screen chart
 
-        // Clear background
+        // Clear background and render a solid background block
         f.render_widget(Clear, popup_area);
+
+        // Fill entire popup area with background color
+        let bg_block = Block::default()
+            .style(Style::default().bg(Theme::BASE));
+        f.render_widget(bg_block, popup_area);
 
         // Load network-wide lock history
         let history = LockHistory::load().unwrap_or_else(|_| LockHistory { entries: Vec::new() });
@@ -1220,18 +1273,21 @@ impl Dashboard {
         ];
 
         // Create chart with dynamic title showing chart type, timeframe, and data count
-        let chart_title = format!(" 📊 {} [{} - {} points] ",
+        // Static gray border matching main dashboard
+        let border_color = Color::Rgb(140, 140, 140);
+        let chart_title = format!(" ┃ {} [{} - {} points] ┃ ",
             self.chart_type.to_string(),
             self.chart_timeframe.to_string(),
             filtered_entries.len());
         let chart = ratatui::widgets::Chart::new(datasets)
+            .style(Style::default().bg(Theme::BASE))  // Set background on chart itself
             .block(
                 Block::default()
                     .title(chart_title)
-                    .title_style(Style::default().fg(Theme::CYAN_BRIGHT).add_modifier(Modifier::BOLD))
+                    .title_style(Style::default().fg(Theme::BLOOMBERG_ORANGE).add_modifier(Modifier::BOLD))
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Theme::CYAN_NEON))
-                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
+                    .border_type(BorderType::Double)
                     .style(Style::default().bg(Theme::BASE)),
             )
             .x_axis(
@@ -1284,13 +1340,14 @@ impl Dashboard {
         // Create info panel below chart
         let chunks = Layout::default()
             .direction(Direction::Vertical)
+            .margin(0)
             .constraints([
                 Constraint::Min(10),        // Chart
                 Constraint::Length(8),      // Info panel with timeframe controls
             ])
             .split(popup_area);
 
-        // Render chart
+        // Render chart directly
         f.render_widget(chart, chunks[0]);
 
         // Get cache age for display
@@ -1371,9 +1428,9 @@ impl Dashboard {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Theme::BORDER_DIM))
-                    .border_type(BorderType::Rounded)
-                    .style(Style::default().bg(Theme::GLASS_1)),
+                    .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
+                    .border_type(BorderType::Double)
+                    .style(Style::default().bg(Theme::BASE)),
             )
             .alignment(ratatui::layout::Alignment::Center);
 
@@ -1383,31 +1440,34 @@ impl Dashboard {
         // Full screen popup (98% x 95%)
         let popup_area = centered_rect(98, 95, area);
 
-        // Clear background
+        // Clear background and render a solid background block
         f.render_widget(Clear, popup_area);
 
-        // Render background block to fill entire popup area
-        let background = Block::default()
+        // Fill entire popup area with background color
+        let bg_block = Block::default()
             .style(Style::default().bg(Theme::BASE));
-        f.render_widget(background, popup_area);
+        f.render_widget(bg_block, popup_area);
 
         // Split layout: Title + Content
         let chunks = Layout::default()
             .direction(Direction::Vertical)
+            .margin(0)
             .constraints([
                 Constraint::Length(3),  // Title
                 Constraint::Min(10),    // Content
             ])
             .split(popup_area);
 
-        // Title
-        let title = Paragraph::new("🎁 AIRDROP POOL STATISTICS")
-            .style(Style::default().fg(Theme::CYAN_BRIGHT).add_modifier(Modifier::BOLD))
+        // Title with static gray border
+        // Static gray border matching main dashboard
+        let border_color = Color::Rgb(140, 140, 140);
+        let title = Paragraph::new("┃ AIRDROP POOL STATISTICS ┃")
+            .style(Style::default().fg(Theme::BLOOMBERG_ORANGE).add_modifier(Modifier::BOLD))
             .alignment(Alignment::Center)
             .block(Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Theme::CYAN_NEON))
-                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
+                .border_type(BorderType::Double)
                 .style(Style::default().bg(Theme::BASE)));
         f.render_widget(title, chunks[0]);
 
@@ -1424,6 +1484,7 @@ impl Dashboard {
         // Content area - split into stats and visual
         let content_chunks = Layout::default()
             .direction(Direction::Vertical)
+            .margin(0)
             .constraints([
                 Constraint::Length(12),  // Stats panel
                 Constraint::Min(10),     // Visual bar
@@ -1462,11 +1523,11 @@ impl Dashboard {
         let stats = Paragraph::new(stats_text)
             .block(Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Theme::BORDER_GLOW))
-                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
+                .border_type(BorderType::Double)
                 .title(" Pool Status ")
-                .title_style(Style::default().fg(Theme::CYAN_BRIGHT).add_modifier(Modifier::BOLD))
-                .style(Style::default().bg(Theme::GLASS_1)))
+                .title_style(Style::default().fg(Theme::BLOOMBERG_ORANGE).add_modifier(Modifier::BOLD))
+                .style(Style::default().bg(Theme::BASE)))
             .alignment(Alignment::Left);
         f.render_widget(stats, content_chunks[0]);
 
@@ -1559,16 +1620,17 @@ impl Dashboard {
         ];
 
         let chart = ratatui::widgets::Chart::new(datasets)
+            .style(Style::default().bg(Theme::BASE))  // Set background on chart itself
             .block(
                 Block::default()
-                    .title(format!(" 📉 Airdrop Pool Depletion [{} - {} snapshots] ",
+                    .title(format!(" ┃ Airdrop Pool Depletion [{} - {} snapshots] ┃ ",
                         self.airdrop_timeframe.to_string(),
                         filtered_entries.len()))
-                    .title_style(Style::default().fg(Theme::CYAN_BRIGHT).add_modifier(Modifier::BOLD))
+                    .title_style(Style::default().fg(Theme::BLOOMBERG_ORANGE).add_modifier(Modifier::BOLD))
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Theme::BORDER_GLOW))
-                    .border_type(BorderType::Rounded)
-                    .style(Style::default().bg(Theme::GLASS_1)),
+                    .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
+                    .border_type(BorderType::Double)
+                    .style(Style::default().bg(Theme::BASE)),
             )
             .x_axis(
                 ratatui::widgets::Axis::default()
@@ -1617,6 +1679,7 @@ impl Dashboard {
                     ])
             );
 
+        // Render chart directly
         f.render_widget(chart, content_chunks[1]);
 
         // Help text
@@ -1642,9 +1705,9 @@ impl Dashboard {
             .alignment(Alignment::Center)
             .block(Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Theme::BORDER_DIM))
-                .border_type(BorderType::Rounded)
-                .style(Style::default().bg(Theme::GLASS_1)));
+                .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
+                .border_type(BorderType::Double)
+                .style(Style::default().bg(Theme::BASE)));
         f.render_widget(help, content_chunks[2]);
     }
     pub fn render_delete_confirm_popup(&self, f: &mut Frame, area: Rect) {
@@ -1720,6 +1783,9 @@ impl Dashboard {
             ]),
         ]));
 
+        // Static gray border matching main dashboard
+        let border_color = Color::Rgb(140, 140, 140);
+
         // Create table
         let table = Table::new(
             rows,
@@ -1729,9 +1795,9 @@ impl Dashboard {
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Double)
-                .border_style(Style::default().fg(Theme::RED_NEON))
-                .title(" DELETE VAULT ")
-                .title_style(Style::default().fg(Theme::RED_NEON).add_modifier(Modifier::BOLD))
+                .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
+                .title(" ┃ DELETE VAULT ┃ ")
+                .title_style(Style::default().fg(Theme::BLOOMBERG_ORANGE).add_modifier(Modifier::BOLD))
                 .style(Style::default().bg(Theme::BASE)),
         );
 
@@ -1782,16 +1848,19 @@ impl Dashboard {
         // Clear the background
         f.render_widget(Clear, help_area);
 
+        // Static gray border matching main dashboard
+        let border_color = Color::Rgb(140, 140, 140);
+
         let help_paragraph = Paragraph::new(help_text)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Theme::CYAN_BRIGHT).add_modifier(Modifier::BOLD))
-                    .border_type(BorderType::Rounded)
-                    .title(" HELP ")
-                    .title_style(Style::default().fg(Theme::CYAN_BRIGHT).add_modifier(Modifier::BOLD)),
+                    .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
+                    .border_type(BorderType::Double)
+                    .title(" ┃ HELP ┃ ")
+                    .title_style(Style::default().fg(Theme::BLOOMBERG_ORANGE).add_modifier(Modifier::BOLD)),
             )
-            .style(Style::default().bg(Theme::GLASS_1))
+            .style(Style::default().bg(Theme::BASE))
             .alignment(Alignment::Left)
             .wrap(Wrap { trim: true });
 

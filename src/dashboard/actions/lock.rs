@@ -1,15 +1,15 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use crate::dashboard::types::{Dashboard, AppMode, ActionStep};
+use crate::dashboard::types::{Dashboard, AppMode};
 use crate::solana::client::VaultClient;
 
 impl Dashboard {
     pub fn execute_lock(&mut self) {
-        self.mode = AppMode::LockPopup;
+        // Stay in Normal mode - will render splash animation in content area
         self.action_steps.clear();
-        self.needs_clear = true;  // Force terminal clear to prevent background artifacts
-        self.status_message = Some("Executing Lock...".to_string());
-        self.pending_action = true;  // Set flag to execute on next loop
+        self.status_message = Some("Locking...".to_string());
+        // Execute immediately
+        self.perform_lock_action();
     }
 
     pub fn perform_lock_action(&mut self) {

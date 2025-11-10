@@ -43,8 +43,8 @@ pub enum TransferInputField {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TransferTokenType {
-    StandardQDUM,
-    PqQDUM,
+    StandardQcoin,
+    Pqcoin,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -120,15 +120,15 @@ pub struct VaultStatus {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LockHistoryEntry {
     pub timestamp: String,      // ISO 8601 format
-    pub locked_amount: f64,     // Total amount of QDUM locked network-wide
+    pub locked_amount: f64,     // Total amount of qcoin locked network-wide
     pub holder_count: usize,    // Number of addresses with locked tokens
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AirdropHistoryEntry {
     pub timestamp: String,       // ISO 8601 format
-    pub distributed: f64,        // Total QDUM claimed from airdrop pool
-    pub remaining: f64,          // Remaining QDUM in pool (out of 3% cap)
+    pub distributed: f64,        // Total pqcoin claimed from airdrop pool
+    pub remaining: f64,          // Remaining pqcoin in pool (out of 3% cap)
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -233,8 +233,8 @@ pub struct Dashboard {
     pub status_message: Option<String>,
     pub vault_status: Option<VaultStatus>,
     pub balance: Option<u64>,
-    pub pq_balance: Option<u64>,      // pqQDUM balance
-    pub standard_balance: Option<u64>, // Standard QDUM balance
+    pub pq_balance: Option<u64>,      // pqcoin balance
+    pub standard_balance: Option<u64>, // Standard qcoin balance
     pub is_loading: bool,
     pub action_steps: Vec<ActionStep>,
     pub vault_client: VaultClient,
@@ -250,16 +250,18 @@ pub struct Dashboard {
     pub transfer_amount: String,
     pub transfer_focused_field: TransferInputField,
     pub transfer_token_type: TransferTokenType,
+    pub in_transfer_form: bool,  // True when actively editing transfer form
     // Bridge state
     pub bridge_amount: String,
-    pub standard_mint: Pubkey,  // Standard QDUM mint
-    pub pq_mint: Pubkey,        // pqQDUM mint
+    pub standard_mint: Pubkey,  // Standard qcoin mint
+    pub pq_mint: Pubkey,        // pqcoin mint
     // New vault state
     pub new_vault_name: String,
     // Vault management state
     pub vault_management_mode: VaultManagementMode,
     pub vault_list: Vec<crate::vault_manager::VaultProfile>,
     pub selected_vault_index: usize,
+    pub in_vault_list: bool,  // True when actively in vault list
     // Delete confirmation state
     pub vault_to_delete: String,
     pub delete_confirmation_input: String,
