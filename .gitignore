@@ -1,2 +1,4 @@
 /target
 design-preview/target/
+*.backup
+*.ts
